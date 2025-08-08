@@ -1,20 +1,17 @@
 import os
 import json
 import logging
-import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message
 from aiogram.filters import Command
+import asyncio
 from aiohttp import web
 
-# ------------------ НАСТРОЙКА ЛОГИРОВАНИЯ ------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-)
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ------------------ ЗАГРУЗКА ДАННЫХ ------------------
+# Загрузка данных из файла data.json
 try:
     with open('data.json', 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -23,18 +20,19 @@ except Exception as e:
     logger.error(f"❌ Ошибка загрузки data.json: {e}")
     raise
 
+# Получение токена бота из переменных окружения
 TOKEN = os.getenv("TOKEN", "")
 if not TOKEN:
     logger.error("TOKEN is missing")
     exit(1)
 
 ALLOWED_IDS = data.get("allowed_user_ids", [])
-user_states = {}  # user_id -> current_category_id
+user_states = {}
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ------------------ HTTP-СЕРВЕР ДЛЯ UPTIMEROBOT ------------------
+# Настройка HTTP-сервера для UptimeRobot
 routes = web.RouteTableDef()
 
 @routes.get('/')
@@ -51,7 +49,7 @@ async def run_http():
     await site.start()
     logger.info(f"HTTP listening on 0.0.0.0:{port}")
 
-# ------------------ ОСНОВНОЙ ФУНКЦИОНАЛ БОТА ------------------
+# Основной функционал бота
 def get_menu(user_id):
     current = user_states.get(user_id)
     if current is None:
@@ -91,14 +89,14 @@ async def handle(msg: Message):
         return
 
     cur = user_states.get(uid)
-    if cur is None:  # выбор категории
+    if cur is None:  # Выбор категории
         for cat in data["categories"]:
             if cat["name"] == text:
                 user_states[uid] = cat["id"]
                 await msg.answer(f"Категория: {text}\n\nВыберите вопрос:", reply_markup=get_menu(uid))
                 return
         await msg.answer("❌ Неизвестная категория.", reply_markup=get_menu(uid))
-    else:  # выбор вопроса
+    else:  # Выбор вопроса
         category = next((c for c in data["categories"] if c["id"] == cur), None)
         if not category:
             user_states[uid] = None
