@@ -49,3 +49,11 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+async def run_http():
+    app = make_http_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))  # Render задаёт 10000 по умолчанию
+    site = web.TCPSite(runner, '0.0.0.0', port)  # слушаем все интерфейсы
+    await site.start()
+    logger.info(f"HTTP listening on 0.0.0.0:{port}")
