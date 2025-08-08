@@ -23,8 +23,13 @@ except Exception as e:
     logger.error(f"❌ Ошибка загрузки data.json: {e}")
     raise
 
-TOKEN = "8228400270:AAG4cMk-QrHHGWlfwTpISI9qJhERumbMm9E"
-ALLOWED_IDS = data["allowed_user_ids"]
+# Токен берём из переменной окружения (безопасно)
+TOKEN = os.getenv("TOKEN", "")
+if not TOKEN:
+    logger.error("❌ Не задана переменная окружения TOKEN")
+    exit(1)
+
+ALLOWED_IDS = data.get("allowed_user_ids", [])
 user_states = {}   # user_id -> current_category_id
 
 bot = Bot(token=TOKEN)
@@ -47,7 +52,7 @@ async def run_http():
     runner = web.AppRunner(http_app)
     await runner.setup()
 
-    port = int(os.environ.get("PORT", 8080))   # Replit подставит нужный порт
+    port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"🌐 HTTP-сервер запущен на 0.0.0.0:{port}")
