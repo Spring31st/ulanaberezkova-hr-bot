@@ -1,10 +1,10 @@
 import os
 import json
 import logging
+import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message
 from aiogram.filters import Command
-import asyncio
 from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
@@ -35,10 +35,10 @@ async def run_http():
     app.add_routes(routes)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info(f"HTTP server on 0.0.0.0:{port}")
+    logger.info(f"HTTP listening on 0.0.0.0:{port}")
 
 @dp.message(Command("start"))
 async def cmd_start(msg: Message):
@@ -49,11 +49,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-async def run_http():
-    app = make_http_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))  # Render задаёт 10000 по умолчанию
-    site = web.TCPSite(runner, '0.0.0.0', port)  # слушаем все интерфейсы
-    await site.start()
-    logger.info(f"HTTP listening on 0.0.0.0:{port}")
