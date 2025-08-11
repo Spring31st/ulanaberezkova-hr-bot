@@ -12,7 +12,7 @@
         {
           "id": 2,
           "question": "🖊️ Как составить заявление о приеме на работу?",
-          "answer": "📎 Шаблон заявления:\n[Скачать шаблон](https://docs.google.com/document/d/1cTJsrcgl5PC-X2CYBQAo640ynLRggJF8WbPPvyI0jnk/edit?hl=ru&tab=t.0)"
+          "answer": "📎 [Скачать шаблон](https://docs.google.com/document/d/1cTJsrcgl5PC-X2CYBQAo640ynLRggJF8WbPPvyI0jnk/edit?hl=ru&tab=t.0)"
         },
         {
           "id": 3,
@@ -28,12 +28,12 @@
         {
           "id": 4,
           "question": "📝 Как составить заявление на отпуск за свой счет?",
-          "answer": "📎 Шаблон заявления:\n[Скачать шаблон](https://docs.google.com/document/d/1zT5OGQ0ZoPtu1vij-ab9Au1GvQcUMSqYdorJO1xUj8s/edit?tab=t.0)"
+          "answer": "📎 [Скачать шаблон](https://docs.google.com/document/d/1zT5OGQ0ZoPtu1vij-ab9Au1GvQcUMSqYdorJO1xUj8s/edit?tab=t.0)"
         },
         {
           "id": 5,
           "question": "💰 Как составить заявление на ежегодный оплачиваемый отпуск?",
-          "answer": "📎 Шаблон заявления:\n[Скачать шаблон](https://docs.google.com/document/d/1BiP5HEaW0o676vzJoC4UNKvRzGnT9TymOw2eSk2MA7k/edit?tab=t.0)"
+          "answer": "📎 [Скачать шаблон](https://docs.google.com/document/d/1BiP5HEaW0o676vzJoC4UNKvRzGnT9TymOw2eSk2MA7k/edit?tab=t.0)"
         },
         {
           "id": 6,
@@ -54,14 +54,14 @@
         {
           "id": 8,
           "question": "✏️ Как составить заявление на увольнение?",
-          "answer": "📎 Шаблон заявления:\n[Скачать шаблон](https://docs.google.com/document/d/13hWBB6fk02v58_zS89LF5ffZSqHNmfKl16FJp1N-A3E/edit?tab=t.0)"
+          "answer": "📎 [Скачать шаблон](https://docs.google.com/document/d/13hWBB6fk02v58_zS89LF5ffZSqHNmfKl16FJp1N-A3E/edit?tab=t.0)"
         }
       ]
     }
   ],
-  "hr_contacts": "5127"
-    "email": "📧 m7090@aviastal.ru"
-    "phone": "📞 +7 (495) 123-45-67"
+  "hr_contacts": {
+    "email": "📧 m7090@aviastal.ru",
+    "phone": "📞 5127",
     "telegram": "💬 @Spring31st"
   },
   "allowed_user_ids": [1041857248, 6629081100, 650918365]
