@@ -177,7 +177,7 @@ async def feedback(callback: CallbackQuery):
             "📞 *HR-отдел:*\n"
             f"📧 {HR_CONTACTS.get('email', '')}\n"
             f"📞 {HR_CONTACTS.get('phone', '')}\n"
-            f"💬 {HR_CONTACTS.get("telegram", [])"
+            "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
         )
         text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
 
