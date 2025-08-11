@@ -169,17 +169,17 @@ async def feedback(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Все категории", callback_data="back_to_cats")]
     ])
 
-    if callback.data == "helpful_yes":
-        stats["helpful"][str(q)] += 1
-        text = "✅ *Спасибо за обратную связь!*"
-    else:
-contacts = (
-    "📞 *HR-отдел:*\n"
-    f"📧 {HR_CONTACTS.get('email', '')}\n"
-    f"📞 {HR_CONTACTS.get('phone', '')}\n"
-    "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
-        )
-        text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
+   if callback.data == "helpful_yes":
+    stats["helpful"][str(q)] += 1
+    text = "✅ *Спасибо за обратную связь!*"
+else:
+    contacts = (
+        "📞 *HR-отдел:*\n"
+        f"📧 {HR_CONTACTS.get('email', '')}\n"
+        f"📞 {HR_CONTACTS.get('phone', '')}\n"
+        "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
+    )
+    text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
 
     save_stats(stats)
     await callback.message.answer(text, parse_mode=PARSE_MODE, reply_markup=kb)
