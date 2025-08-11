@@ -21,9 +21,10 @@ if not TOKEN:
     logger.error("TOKEN is missing")
     exit(1)
 
-ALLOWED_IDS = data.get("allowed_user_ids", [])
-ADMIN_IDS = data.get("admin_ids", [])
-HR_CONTACTS = data.get("hr_contacts", {})
+ALLOWED_IDS   = data.get("allowed_user_ids", [])
+ADMIN_IDS     = data.get("admin_ids", [])
+HR_CONTACTS   = data.get("hr_contacts", {})
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -49,11 +50,16 @@ stats = load_stats()
 
 # ---------- HTTP ----------
 routes = web.RouteTableDef()
+
 @routes.get('/')
-async def health(request): return web.Response(text="OK")
+async def health(request):
+    return web.Response(text="OK")
+
 async def run_http():
-    app = web.Application(); app.add_routes(routes)
-    runner = web.AppRunner(app); await runner.setup()
+    app = web.Application()
+    app.add_routes(routes)
+    runner = web.AppRunner(app)
+    await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000))).start()
 
 # ---------- пагинация ----------
@@ -72,14 +78,15 @@ def paginate(items: list[str], page: int, prefix: str):
         kb.row(*nav)
     return kb.as_markup()
 
-def allowed(uid): return uid in ALLOWED_IDS
+def allowed(uid):  return uid in ALLOWED_IDS
 def is_admin(uid): return uid in ADMIN_IDS
 
 # ---------- /start ----------
 @dp.message(Command("start"))
 async def cmd_start(msg: Message):
     if not allowed(msg.from_user.id):
-        await msg.answer("❌ Доступ запрещён."); return
+        await msg.answer("❌ Доступ запрещён.")
+        return
     cat_names = [c["name"] for c in data["categories"]]
     await msg.answer("👋 Выберите категорию:", reply_markup=paginate(cat_names, 0, "cat"))
 
@@ -87,11 +94,13 @@ async def cmd_start(msg: Message):
 @dp.message(Command("stats"))
 async def cmd_stats(msg: Message):
     if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Команда доступна только админам."); return
+        await msg.answer("❌ Команда доступна только админам.")
+        return
 
     not_help = stats["not_helpful"]
     if not not_help:
-        await msg.answer("📊 Пока ни одного «не помог»."); return
+        await msg.answer("📊 Пока ни одного «не помог».")
+        return
 
     top = not_help.most_common(5)
     lines = [f"{idx+1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top)]
@@ -101,7 +110,8 @@ async def cmd_stats(msg: Message):
 @dp.callback_query(lambda c: c.data.startswith("cat_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
-    if not allowed(uid): return
+    if not allowed(uid):
+        return
 
     if callback.data.startswith(("cat_prev_", "cat_next_")):
         _, _, _, page = callback.data.split("_")
@@ -109,7 +119,8 @@ async def pick_category(callback: CallbackQuery):
         await callback.message.edit_reply_markup(
             reply_markup=paginate(cat_names, int(page), "cat")
         )
-        await callback.answer(); return
+        await callback.answer()
+        return
 
     cat_idx = int(callback.data.split("_")[1])
     category = data["categories"][cat_idx]
@@ -127,7 +138,8 @@ async def pick_category(callback: CallbackQuery):
 @dp.callback_query(lambda c: c.data.startswith("q_"))
 async def pick_question(callback: CallbackQuery):
     uid = callback.from_user.id
-    if not allowed(uid): return
+    if not allowed(uid):
+        return
 
     if callback.data.startswith(("q_prev_", "q_next_")):
         _, _, _, page = callback.data.split("_")
@@ -137,7 +149,8 @@ async def pick_question(callback: CallbackQuery):
         await callback.message.edit_reply_markup(
             reply_markup=paginate(q_titles, int(page), "q")
         )
-        await callback.answer(); return
+        await callback.answer()
+        return
 
     q_idx = int(callback.data.split("_")[1])
     cat_id = user_states[uid]["cat"]
@@ -173,13 +186,17 @@ async def feedback(callback: CallbackQuery):
         stats["helpful"][str(q)] += 1
         text = "✅ *Спасибо за обратную связь!*"
     else:
-        contacts = (
-            "📞 *HR-отдел:*\n"
-            f"📧 {HR_CONTACTS.get('email', '')}\n"
-            f"📞 {HR_CONTACTS.get('phone', '')}\n"
-            "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
-        )
-        text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
+        # --- аккуратное форматирование контактов ---
+        lines = ["😔 *К сожалению, не смог помочь.*", "", "📞 *HR-отдел:*"]
+        if HR_CONTACTS.get("email"):
+            lines.append(f"📧 *E-mail:* {HR_CONTACTS['email']}")
+        if HR_CONTACTS.get("phone"):
+            lines.append(f"📞 *Телефон:* {HR_CONTACTS['phone']}")
+        for tg in HR_CONTACTS.get("telegram", []):
+            if tg:
+                lines.append(f"💬 *Telegram:* {tg}")
+        text = "\n".join(lines)
+        # -------------------------------------------
 
     save_stats(stats)
     await callback.message.answer(text, parse_mode=PARSE_MODE, reply_markup=kb)
@@ -189,7 +206,8 @@ async def feedback(callback: CallbackQuery):
 @dp.callback_query(lambda c: c.data == "back_to_cats")
 async def back_to_categories(callback: CallbackQuery):
     uid = callback.from_user.id
-    if not allowed(uid): return
+    if not allowed(uid):
+        return
     user_states[uid] = None
     cat_names = [c["name"] for c in data["categories"]]
     await callback.message.answer(
