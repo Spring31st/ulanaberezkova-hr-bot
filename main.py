@@ -3,195 +3,131 @@ import json
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton, Message,
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.filters import Command
 import asyncio
 from aiohttp import web
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# ---------- настройки ----------
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Загрузка данных из файла data.json
-try:
-    with open('data.json', 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    logger.info(f"✅ Загружено {len(data['categories'])} категорий")
-except Exception as e:
-    logger.error(f"❌ Ошибка загрузки data.json: {e}")
-    raise
+with open('data.json', encoding='utf-8') as f:
+    data = json.load(f)
 
-# Получение токена бота из переменных окружения
-TOKEN = os.getenv("TOKEN", "")
+TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    logger.error("TOKEN is missing")
-    exit(1)
+    logger.error("TOKEN is missing"); exit(1)
 
 ALLOWED_IDS = data.get("allowed_user_ids", [])
-user_states = {}
-
+HR_CONTACTS = data.get("hr_contacts", {})
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Контакты HR
-HR_CONTACTS = data.get("hr_contacts", {
-    "email": "📧 hr@company.com",
-    "phone": "📞 +7 (495) 123-45-67",
-    "telegram": "💬 @hr_support"
-})
+user_states = {}         # {uid: category_id}
+PAGE_SIZE = 7            # сколько кнопок на странице
+# --------------------------------
 
-# Настройка HTTP-сервера для UptimeRobot
+# ---------- HTTP для UptimeRobot ----------
 routes = web.RouteTableDef()
-
 @routes.get('/')
-async def health(request):
-    return web.Response(text="OK")
-
+async def health(request): return web.Response(text="OK")
 async def run_http():
-    app = web.Application()
-    app.add_routes(routes)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"HTTP listening on 0.0.0.0:{port}")
+    app = web.Application(); app.add_routes(routes)
+    runner = web.AppRunner(app); await runner.setup()
+    await web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000))).start()
+# --------------------------------
 
-# Основной функционал бота
-def get_menu(user_id):
-    current = user_states.get(user_id)
-    if current is None:
-        buttons = [[KeyboardButton(text=cat["name"])] for cat in data["categories"]]
-    else:
-        category = next((c for c in data["categories"] if c["id"] == current), None)
-        if not category:
-            user_states[user_id] = None
-            return get_menu(user_id)
-        buttons = [[KeyboardButton(text=q["question"])] for q in category["questions"]]
-        buttons.append([KeyboardButton(text="🔙 Назад к категориям")])
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+# ---------- пагинация ----------
+def paginate(items: list[str], page: int, prefix: str):
+    kb = InlineKeyboardBuilder()
+    start = page * PAGE_SIZE
+    for idx, text in enumerate(items[start:start + PAGE_SIZE], start):
+        kb.button(text=text, callback_data=f"{prefix}_{idx}")
+    kb.adjust(1)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"{prefix}_prev_{page-1}"))
+    if start + PAGE_SIZE < len(items):
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"{prefix}_next_{page+1}"))
+    if nav:
+        kb.row(*nav)
+    return kb.as_markup()
+# --------------------------------
 
-def get_feedback_keyboard():
-    """Создаёт инлайн-клавиатуру для обратной связи"""
-    keyboard = [
-        [
-            InlineKeyboardButton(text="👍 Помог", callback_data="helpful_yes"),
-            InlineKeyboardButton(text="👎 Не помог", callback_data="helpful_no")
-        ]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-def format_hr_contacts():
-    """Форматирует контакты HR в красивый вид"""
-    return (
-        "📞 **HR-отдел:**\n"
-        f"{HR_CONTACTS.get('email', '')}\n"
-        f"{HR_CONTACTS.get('phone', '')}\n"
-        f"{HR_CONTACTS.get('telegram', '')}"
-    )
-
-def allowed(uid):
-    return uid in ALLOWED_IDS
+def allowed(uid): return uid in ALLOWED_IDS
 
 @dp.message(Command("start"))
 async def cmd_start(msg: Message):
-    uid = msg.from_user.id
-    if not allowed(uid):
-        await msg.answer("❌ Доступ запрещён.")
-        return
-    user_states[uid] = None
-    await msg.answer(
-        "👋 Здравствуйте! Выберите категорию:",
-        reply_markup=get_menu(uid)
+    if not allowed(msg.from_user.id):
+        await msg.answer("❌ Доступ запрещён."); return
+    cat_names = [c["name"] for c in data["categories"]]
+    await msg.answer("👋 Выберите категорию:", reply_markup=paginate(cat_names, 0, "cat"))
+
+# ---------- выбор категории ----------
+@dp.callback_query(lambda c: c.data.startswith("cat_"))
+async def pick_category(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not allowed(uid): return
+    if callback.data.startswith(("cat_prev_", "cat_next_")):
+        _, _, _, page = callback.data.split("_")
+        cat_names = [c["name"] for c in data["categories"]]
+        await callback.message.edit_reply_markup(
+            reply_markup=paginate(cat_names, int(page), "cat")
+        )
+        await callback.answer(); return
+
+    cat_idx = int(callback.data.split("_")[1])
+    category = data["categories"][cat_idx]
+    user_states[uid] = category["id"]
+    q_titles = [q["question"] for q in category["questions"]]
+    await callback.message.edit_text(
+        f"📂 {category['name']}\n\nВыберите вопрос:",
+        reply_markup=paginate(q_titles, 0, "q")
     )
+    await callback.answer()
 
-@dp.message()
-async def handle(msg: Message):
-    uid = msg.from_user.id
-    if not allowed(uid):
-        await msg.answer("❌ Доступ запрещён.")
-        return
-    
-    text = msg.text.strip()
+# ---------- выбор вопроса ----------
+@dp.callback_query(lambda c: c.data.startswith("q_"))
+async def pick_question(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not allowed(uid): return
+    if callback.data.startswith(("q_prev_", "q_next_")):
+        _, _, _, page = callback.data.split("_")
+        cat_id = user_states.get(uid)
+        category = next(c for c in data["categories"] if c["id"] == cat_id)
+        q_titles = [q["question"] for q in category["questions"]]
+        await callback.message.edit_reply_markup(
+            reply_markup=paginate(q_titles, int(page), "q")
+        )
+        await callback.answer(); return
 
-    if text == "🔙 Назад к категориям":
-        user_states[uid] = None
-        await msg.answer(
-            "Выберите категорию:",
-            reply_markup=get_menu(uid)
-        )
-        return
+    q_idx = int(callback.data.split("_")[1])
+    cat_id = user_states[uid]
+    category = next(c for c in data["categories"] if c["id"] == cat_id)
+    question = category["questions"][q_idx]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👍 Помог", callback_data="helpful_yes"),
+         InlineKeyboardButton(text="👎 Не помог", callback_data="helpful_no")]
+    ])
+    await callback.message.edit_text(question["answer"], reply_markup=kb)
+    await callback.answer()
 
-    cur = user_states.get(uid)
-    if cur is None:  # Выбор категории
-        for cat in data["categories"]:
-            if cat["name"] == text:
-                user_states[uid] = cat["id"]
-                await msg.answer(
-                    f"📂 Категория: {text}\n\nВыберите вопрос:",
-                    reply_markup=get_menu(uid)
-                )
-                return
-        await msg.answer(
-            "❌ Неизвестная категория.",
-            reply_markup=get_menu(uid)
-        )
-    else:  # Выбор вопроса
-        category = next((c for c in data["categories"] if c["id"] == cur), None)
-        if not category:
-            user_states[uid] = None
-            await msg.answer(
-                "❌ Ошибка. Вернитесь в главное меню.",
-                reply_markup=get_menu(uid)
-            )
-            return
-        
-        for q in category["questions"]:
-            if q["question"] == text:
-                await msg.answer(
-                    q["answer"],
-                    reply_markup=get_feedback_keyboard()
-                )
-                return
-        
-        await msg.answer(
-            "❌ Неизвестный вопрос.",
-            reply_markup=get_menu(uid)
-        )
+# ---------- обратная связь ----------
+@dp.callback_query(lambda c: c.data in {"helpful_yes", "helpful_no"})
+async def feedback(callback: CallbackQuery):
+    message = callback.message
+    if callback.data == "helpful_yes":
+        await message.edit_text(f"{message.text}\n\n✅ Спасибо за обратную связь!", parse_mode="HTML")
+    else:
+        contacts = "\n".join([f"{v}" for v in HR_CONTACTS.values()])
+        await message.edit_text(f"{message.text}\n\n😔 К сожалению, не смог помочь.\n\n{contacts}", parse_mode="HTML")
+    await callback.answer()
 
-@dp.callback_query()
-async def handle_callback(callback_query: CallbackQuery):
-    """Обработчик нажатий на инлайн-кнопки обратной связи"""
-    uid = callback_query.from_user.id
-    if not allowed(uid):
-        await callback_query.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    message = callback_query.message
-    data = callback_query.data
-    
-    if data == "helpful_yes":
-        # Удаляем клавиатуру и добавляем подтверждение
-        await message.edit_text(
-            f"{message.text}\n\n✅ **Спасибо за обратную связь!**",
-            parse_mode="HTML"
-        )
-        await callback_query.answer("Спасибо!")
-        
-    elif data == "helpful_no":
-        # Добавляем контакты HR
-        contacts = format_hr_contacts()
-        await message.edit_text(
-            f"{message.text}\n\n😔 **К сожалению, не смог помочь**\n\n{contacts}",
-            parse_mode="HTML"
-        )
-        await callback_query.answer("Контакты HR отправлены")
-
+# ---------- старт ----------
 async def main():
     await asyncio.gather(run_http(), dp.start_polling(bot, skip_updates=True))
 
