@@ -29,7 +29,7 @@ HR_CONTACTS = data.get("hr_contacts", {})
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-user_states = {}
+user_states = {}          # {uid: {"cat":..., "q":..., "remind": {...}}}
 PAGE_SIZE = 7
 PARSE_MODE = "Markdown"
 STATS_FILE = "stats.json"
@@ -72,12 +72,13 @@ next_remind_id = max(
 ) + 1
 
 async def reminder_worker():
-    """Раз в минуту отправляет готовые напоминания."""
+    """Отправляет готовые напоминания каждую минуту."""
     global reminders, next_remind_id
     while True:
+        await asyncio.sleep(60)
         now = datetime.now()
         to_delete = []
-        for uid, lst in reminders.items():
+        for uid, lst in list(reminders.items()):
             still_active = []
             for r in lst:
                 dt = datetime.strptime(r["dt_str"], "%d.%m.%Y %H:%M")
@@ -98,7 +99,6 @@ async def reminder_worker():
             reminders[uid] = [r for r in reminders.get(uid, []) if r["id"] != rid]
         reminders = {k: v for k, v in reminders.items() if v}
         save_reminders(reminders)
-        await asyncio.sleep(60)
 
 # ---------- HTTP ----------
 routes = web.RouteTableDef()
@@ -158,7 +158,7 @@ async def cmd_stats(msg: Message):
         await msg.answer("📊 Пока ни одного «не помог».")
         return
     top = not_help.most_common(5)
-    lines = [f"{idx+1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top)]
+    lines = [f"{idx+1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top, 1)]
     await msg.answer("📉 ТОП-5 «не помог»:\n" + "\n".join(lines))
 
 # ---------- категории ----------
@@ -257,7 +257,7 @@ async def feedback(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode=PARSE_MODE, reply_markup=kb)
     await callback.answer()
 
-# ---------- напоминания (инлайн-режим) ----------
+# ---------- напоминания ----------
 @dp.callback_query(lambda c: c.data == "main_menu")
 async def cb_main_menu(callback: CallbackQuery):
     if not allowed(callback.from_user.id):
@@ -268,6 +268,7 @@ async def cb_main_menu(callback: CallbackQuery):
     )
     await callback.answer()
 
+# --- создание ---
 @dp.callback_query(lambda c: c.data == "remind_start")
 async def remind_start(callback: CallbackQuery):
     if not allowed(callback.from_user.id):
@@ -278,19 +279,15 @@ async def remind_start(callback: CallbackQuery):
             inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
         )
     )
-    # сохраняем флаг, что ждём дату
     user_states[callback.from_user.id]["wait_remind"] = "date"
     await callback.answer()
 
 @dp.message()
 async def handle_remind(msg: Message):
     uid = msg.from_user.id
-    if not allowed(uid) or uid not in user_states:
+    if not allowed(uid):
         return
-    state = user_states[uid].get("wait_remind")
-    if not state:
-        return  # не наш процесс
-
+    state = user_states.get(uid, {}).get("wait_remind")
     if state == "date":
         try:
             datetime.strptime(msg.text, "%d.%m.%Y")
@@ -328,6 +325,7 @@ async def handle_remind(msg: Message):
         del user_states[uid]["wait_remind"]
         await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
 
+# --- список / удаление ---
 @dp.callback_query(lambda c: c.data == "list_reminders")
 async def list_reminders(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -351,14 +349,17 @@ async def list_reminders(callback: CallbackQuery):
         ])
     kb_rows.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
     await callback.message.edit_text(
-        "📋 Ваши напоминания:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        "📋 Ваши напоминания:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
     )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("delrem_"))
 async def del_remind(callback: CallbackQuery):
+    global reminders
     uid = callback.from_user.id
     if not allowed(uid):
+        await callback.answer("Нет доступа", show_alert=True)
         return
     rid = int(callback.data.split("_")[1])
     reminders[uid] = [r for r in reminders.get(uid, []) if r["id"] != rid]
@@ -366,6 +367,27 @@ async def del_remind(callback: CallbackQuery):
     save_reminders(reminders)
     await callback.answer("🗑 Удалено!")
     await list_reminders(callback)
+
+# ---------- статистика ----------
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if uid not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    not_help = stats["not_helpful"]
+    if not not_help:
+        txt = "📊 Пока ни одного «не помог»."
+    else:
+        top = not_help.most_common(5)
+        txt = "📉 ТОП-5 «не помог»:\n" + "\n".join(
+            f"{i}. {q} — {cnt}" for i, (q, cnt) in enumerate(top, 1)
+        )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
+    )
+    await callback.message.edit_text(txt, reply_markup=kb)
+    await callback.answer()
 
 # ---------- запуск ----------
 async def main():
