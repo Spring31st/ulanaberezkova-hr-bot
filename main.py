@@ -173,11 +173,11 @@ async def feedback(callback: CallbackQuery):
         stats["helpful"][str(q)] += 1
         text = "✅ *Спасибо за обратную связь!*"
     else:
-        contacts = (
-            "📞 *HR-отдел:*\n"
-            f"📧 {HR_CONTACTS.get('email', '')}\n"
-            f"📞 {HR_CONTACTS.get('phone', '')}\n"
-            "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
+contacts = (
+    "📞 *HR-отдел:*\n"
+    f"📧 {HR_CONTACTS.get('email', '')}\n"
+    f"📞 {HR_CONTACTS.get('phone', '')}\n"
+    "\n".join([f"💬 {t}" for t in HR_CONTACTS.get("telegram", [])])
         )
         text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
 
