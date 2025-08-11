@@ -7,11 +7,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
-from collections import Counter, defaultdict
+from collections import Counter
 
 # ---------- настройки ----------
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +27,7 @@ ADMIN_IDS   = data.get("admin_ids", [])
 HR_CONTACTS = data.get("hr_contacts", {})
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())   # MemoryStorage для FSM
+dp = Dispatcher()
 
 user_states = {}
 PAGE_SIZE = 7
@@ -38,7 +35,11 @@ PARSE_MODE = "Markdown"
 STATS_FILE = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
-# ---------- статистика ----------
+# ---------- helpers ----------
+def allowed(uid): return uid in ALLOWED_IDS
+def is_admin(uid): return uid in ADMIN_IDS
+
+# ---------- stats ----------
 def load_stats():
     if not os.path.exists(STATS_FILE):
         return {"helpful": Counter(), "not_helpful": Counter()}
@@ -54,7 +55,7 @@ def save_stats(stats):
 stats = load_stats()
 
 # ---------- reminders ----------
-def load_reminders() -> dict:
+def load_reminders():
     if not os.path.exists(REMINDERS_FILE):
         return {}
     with open(REMINDERS_FILE, encoding='utf-8') as f:
@@ -63,7 +64,7 @@ def load_reminders() -> dict:
 
 def save_reminders(reminders):
     with open(REMINDERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(reminders, f, ensure_ascii=False, indent=2, default=str)
+        json.dump(reminders, f, ensure_ascii=False, indent=2)
 
 reminders = load_reminders()
 next_remind_id = max(
@@ -88,12 +89,11 @@ async def reminder_worker():
                             parse_mode="Markdown"
                         )
                     except Exception as e:
-                        logger.warning(f"Не удалось отправить напоминание {r['id']} юзеру {uid}: {e}")
+                        logger.warning(f"Не отправлено {r['id']} юзеру {uid}: {e}")
                     to_delete.append((uid, r["id"]))
                 else:
                     still_active.append(r)
             reminders[uid] = still_active
-        # удаляем отправленные
         for uid, rid in to_delete:
             reminders[uid] = [r for r in reminders.get(uid, []) if r["id"] != rid]
         reminders = {k: v for k, v in reminders.items() if v}
@@ -102,7 +102,6 @@ async def reminder_worker():
 
 # ---------- HTTP ----------
 routes = web.RouteTableDef()
-
 @routes.get('/')
 async def health(request):
     return web.Response(text="OK")
@@ -130,14 +129,11 @@ def paginate(items: list[str], page: int, prefix: str):
         kb.row(*nav)
     return kb.as_markup()
 
-def allowed(uid):  return uid in ALLOWED_IDS
-def is_admin(uid): return uid in ADMIN_IDS
-
 # ---------- главное меню ----------
 def main_menu_kb(user_id: int) -> InlineKeyboardMarkup:
     kb = [
-        [InlineKeyboardButton(text="📚 HR-справка", callback_data="hr_faq")],
-        [InlineKeyboardButton(text="📅 Создать напоминание", callback_data="create_remind_step1")],
+        [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="cat_0")],
+        [InlineKeyboardButton(text="📅 Создать напоминание", callback_data="remind_start")],
         [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="list_reminders")]
     ]
     if user_id in ADMIN_IDS:
@@ -165,60 +161,13 @@ async def cmd_stats(msg: Message):
     lines = [f"{idx+1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top)]
     await msg.answer("📉 ТОП-5 «не помог»:\n" + "\n".join(lines))
 
-# ---------- FSM для создания напоминания ----------
-class RemindFSM(StatesGroup):
-    date = State()
-    time = State()
-    text = State()
-
-# ---------- колбэки главного меню ----------
-@dp.callback_query(lambda c: c.data == "main_menu")
-async def cb_main_menu(callback: CallbackQuery):
-    if not allowed(callback.from_user.id):
-        return
-    await callback.message.edit_text(
-        "👋 Что вас интересует?",
-        reply_markup=main_menu_kb(callback.from_user.id)
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "admin_stats")
-async def cb_admin_stats(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет прав", show_alert=True)
-        return
-    not_help = stats["not_helpful"]
-    if not not_help:
-        text = "📊 Пока ни одного «не помог»."
-    else:
-        top = not_help.most_common(5)
-        lines = [f"{idx+1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top)]
-        text = "📉 ТОП-5 «не помог»:\n" + "\n".join(lines)
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
-    )
-    await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
-
-# ---------- HR FAQ ----------
-@dp.callback_query(lambda c: c.data == "hr_faq")
-async def cb_hr_faq(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-    cat_names = [c["name"] for c in data["categories"]]
-    kb = paginate(cat_names, 0, "cat")
-    kb.inline_keyboard.append(
-        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
-    )
-    await callback.message.edit_text("📚 Выберите категорию:", reply_markup=kb)
-    await callback.answer()
-
+# ---------- категории ----------
 @dp.callback_query(lambda c: c.data.startswith("cat_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     if callback.data.startswith(("cat_prev_", "cat_next_")):
         _, _, _, page = callback.data.split("_")
         cat_names = [c["name"] for c in data["categories"]]
@@ -244,11 +193,13 @@ async def pick_category(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ---------- вопросы ----------
 @dp.callback_query(lambda c: c.data.startswith("q_"))
 async def pick_question(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     if callback.data.startswith(("q_prev_", "q_next_")):
         _, _, _, page = callback.data.split("_")
         cat_id = user_states.get(uid, {}).get("cat")
@@ -288,6 +239,7 @@ async def feedback(callback: CallbackQuery):
         stats["helpful"][str(q)] += 1
         text = "✅ *Спасибо за обратную связь!*"
     else:
+        stats["not_helpful"][str(q)] += 1
         lines = ["😔 *К сожалению, не смог помочь.*", "", "📞 *HR-отдел:*"]
         if HR_CONTACTS.get("email"):
             lines.append(f"📧 *E-mail:* {HR_CONTACTS['email']}")
@@ -305,9 +257,19 @@ async def feedback(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode=PARSE_MODE, reply_markup=kb)
     await callback.answer()
 
-# ---------- создание напоминания ----------
-@dp.callback_query(lambda c: c.data == "create_remind_step1")
-async def create_remind_step1(callback: CallbackQuery, state: FSMContext):
+# ---------- напоминания (инлайн-режим) ----------
+@dp.callback_query(lambda c: c.data == "main_menu")
+async def cb_main_menu(callback: CallbackQuery):
+    if not allowed(callback.from_user.id):
+        return
+    await callback.message.edit_text(
+        "👋 Что вас интересует?",
+        reply_markup=main_menu_kb(callback.from_user.id)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "remind_start")
+async def remind_start(callback: CallbackQuery):
     if not allowed(callback.from_user.id):
         return
     await callback.message.edit_text(
@@ -316,56 +278,56 @@ async def create_remind_step1(callback: CallbackQuery, state: FSMContext):
             inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
         )
     )
-    await state.set_state(RemindFSM.date)
+    # сохраняем флаг, что ждём дату
+    user_states[callback.from_user.id]["wait_remind"] = "date"
     await callback.answer()
 
-@dp.message(RemindFSM.date)
-async def create_remind_date(msg: Message, state: FSMContext):
-    try:
-        datetime.strptime(msg.text, "%d.%m.%Y")
-    except ValueError:
-        await msg.answer("❗️ Неверный формат. Введите ДД.ММ.ГГГГ:")
-        return
-    await state.update_data(date=msg.text)
-    await msg.answer("⏰ Введите время в формате ЧЧ:ММ (например 09:30):")
-    await state.set_state(RemindFSM.time)
-
-@dp.message(RemindFSM.time)
-async def create_remind_time(msg: Message, state: FSMContext):
-    try:
-        datetime.strptime(msg.text, "%H:%M")
-    except ValueError:
-        await msg.answer("❗️ Неверный формат. Введите ЧЧ:ММ:")
-        return
-    await state.update_data(time=msg.text)
-    await msg.answer("📝 Введите текст напоминания:")
-    await state.set_state(RemindFSM.text)
-
-@dp.message(RemindFSM.text)
-async def create_remind_text(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    dt_str = f"{data['date']} {data['time']}"
-    try:
-        dt = datetime.strptime(dt_str, "%d.%m.%Y %H:%M")
-    except ValueError:
-        await msg.answer("❗️ Ошибка даты/времени, попробуйте ещё раз.")
-        await state.clear()
-        return
-    if dt <= datetime.now():
-        await msg.answer("❗️ Укажите будущую дату и время.")
-        await state.clear()
-        return
-    global next_remind_id
+@dp.message()
+async def handle_remind(msg: Message):
     uid = msg.from_user.id
-    reminders.setdefault(uid, []).append(
-        {"id": next_remind_id, "dt_str": dt_str, "text": msg.text}
-    )
-    next_remind_id += 1
-    save_reminders(reminders)
-    await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
-    await state.clear()
+    if not allowed(uid) or uid not in user_states:
+        return
+    state = user_states[uid].get("wait_remind")
+    if not state:
+        return  # не наш процесс
 
-# ---------- просмотр/удаление напоминаний ----------
+    if state == "date":
+        try:
+            datetime.strptime(msg.text, "%d.%m.%Y")
+        except ValueError:
+            await msg.answer("❗️ Неверный формат. Введите ДД.ММ.ГГГГ:")
+            return
+        user_states[uid]["wait_remind"] = "time"
+        user_states[uid]["remind_date"] = msg.text
+        await msg.answer("⏰ Введите время в формате ЧЧ:ММ (например 09:30):")
+    elif state == "time":
+        try:
+            datetime.strptime(msg.text, "%H:%M")
+        except ValueError:
+            await msg.answer("❗️ Неверный формат. Введите ЧЧ:ММ:")
+            return
+        user_states[uid]["wait_remind"] = "text"
+        user_states[uid]["remind_time"] = msg.text
+        await msg.answer("📝 Введите текст напоминания:")
+    elif state == "text":
+        global next_remind_id
+        dt_str = f"{user_states[uid]['remind_date']} {user_states[uid]['remind_time']}"
+        try:
+            dt = datetime.strptime(dt_str, "%d.%m.%Y %H:%M")
+        except ValueError:
+            await msg.answer("❗️ Ошибка даты/времени.")
+            return
+        if dt <= datetime.now():
+            await msg.answer("❗️ Укажите будущую дату и время.")
+            return
+        reminders.setdefault(uid, []).append(
+            {"id": next_remind_id, "dt_str": dt_str, "text": msg.text}
+        )
+        next_remind_id += 1
+        save_reminders(reminders)
+        del user_states[uid]["wait_remind"]
+        await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
+
 @dp.callback_query(lambda c: c.data == "list_reminders")
 async def list_reminders(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -403,7 +365,7 @@ async def del_remind(callback: CallbackQuery):
     reminders = {k: v for k, v in reminders.items() if v}
     save_reminders(reminders)
     await callback.answer("🗑 Удалено!")
-    await list_reminders(callback)  # обновляем список
+    await list_reminders(callback)
 
 # ---------- запуск ----------
 async def main():
