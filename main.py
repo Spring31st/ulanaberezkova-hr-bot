@@ -27,7 +27,7 @@ HR_CONTACTS = data.get("hr_contacts", {})
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-user_states = {}          # {uid: {"cat": cat_id, "q": q_id}}
+user_states = {}
 PAGE_SIZE = 7
 PARSE_MODE = "Markdown"
 STATS_FILE = "stats.json"
@@ -165,18 +165,23 @@ async def feedback(callback: CallbackQuery):
     uid = callback.from_user.id
     q = user_states.get(uid, {}).get("q", "unknown")
 
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Все категории", callback_data="back_to_cats")]
+    ])
+
     if callback.data == "helpful_yes":
         stats["helpful"][str(q)] += 1
         text = "✅ *Спасибо за обратную связь!*"
     else:
-        stats["not_helpful"][str(q)] += 1
-        text = "😔 *К сожалению, не смог помочь.*"
+        contacts = (
+            "📞 *HR-отдел:*\n"
+            f"📧 {HR_CONTACTS.get('email', '')}\n"
+            f"📞 {HR_CONTACTS.get('phone', '')}\n"
+            f"💬 {HR_CONTACTS.get('telegram', '')}"
+        )
+        text = f"😔 *К сожалению, не смог помочь.*\n\n{contacts}"
 
     save_stats(stats)
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Все категории", callback_data="back_to_cats")]
-    ])
     await callback.message.answer(text, parse_mode=PARSE_MODE, reply_markup=kb)
     await callback.answer()
 
