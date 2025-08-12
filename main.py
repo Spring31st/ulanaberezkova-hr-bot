@@ -145,23 +145,33 @@ async def cb_main_menu(callback: CallbackQuery):
         return
     await callback.message.edit_text("👋 Что вас интересует?", reply_markup=main_menu_kb(callback.from_user.id))
     await callback.answer()
-
 @dp.callback_query(lambda c: c.data.startswith("categories_"))
 async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    prefix, *rest = callback.data.split("_")
-    page = int(rest[0])
+
+    parts = callback.data.split("_")
+    # parts: ["categories", <page|prev|next>, <optional number>]
+
+    if parts[1] in ("prev", "next"):
+        # Pagination button pressed
+        page = int(parts[2])
+    else:
+        # Category page button pressed
+        page = int(parts[1])
+
     cat_names = [
         c["name"] for c in data["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
+
     await callback.message.edit_text(
         "📂 Выберите категорию:",
         reply_markup=paginate(cat_names, page, "categories")
     )
     await callback.answer()
+
 
 @dp.callback_query(lambda c: c.data.startswith("category_"))
 async def pick_category(callback: CallbackQuery):
