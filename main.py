@@ -145,6 +145,7 @@ async def cb_main_menu(callback: CallbackQuery):
         return
     await callback.message.edit_text("👋 Что вас интересует?", reply_markup=main_menu_kb(callback.from_user.id))
     await callback.answer()
+
 @dp.callback_query(lambda c: c.data.startswith("categories_"))
 async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -152,13 +153,9 @@ async def show_categories(callback: CallbackQuery):
         return
 
     parts = callback.data.split("_")
-    # parts: ["categories", <page|prev|next>, <optional number>]
-
     if parts[1] in ("prev", "next"):
-        # Pagination button pressed
         page = int(parts[2])
     else:
-        # Category page button pressed
         page = int(parts[1])
 
     cat_names = [
@@ -166,19 +163,25 @@ async def show_categories(callback: CallbackQuery):
         if not c.get("admin_only", False) or is_admin(uid)
     ]
 
+    # ✅ Ключевое исправление: используем префикс "category" (без s), а не "categories"
     await callback.message.edit_text(
         "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "categories")
+        reply_markup=paginate(cat_names, page, "category")  # ← здесь было "categories", теперь "category"
     )
     await callback.answer()
-
 
 @dp.callback_query(lambda c: c.data.startswith("category_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    cat_idx = int(callback.data.split("_")[1])
+
+    try:
+        cat_idx = int(callback.data.split("_")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка обработки категории.")
+        return
+
     categories = [
         c for c in data["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
@@ -186,225 +189,17 @@ async def pick_category(callback: CallbackQuery):
     if cat_idx >= len(categories):
         await callback.answer("Ошибка категории.")
         return
+
     category = categories[cat_idx]
     user_states[uid] = {"cat": category["id"]}
-    kb = paginate([q["question"] for q in category["questions"]], 0, "category")
+
+    question_titles = [q["question"] for q in category["questions"]]
+    kb = paginate(question_titles, 0, "q")  # префикс "q" для вопросов
     kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
+
     await callback.message.edit_text(
         f"📂 *{category['name']}*\n\nВыберите вопрос:",
         parse_mode="Markdown",
         reply_markup=kb
     )
     await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("q_"))
-async def pick_question(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-
-    if callback.data.startswith(("q_prev_", "q_next_")):
-        prefix, *rest = callback.data.split("_")
-        page = int(rest[-1])
-        cat_id = user_states.get(uid, {}).get("cat")
-        questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
-        q_titles = [q["question"] for q in questions]
-        await callback.message.edit_reply_markup(reply_markup=paginate(q_titles, page, "q"))
-        return await callback.answer()
-
-    q_idx = int(callback.data.split("_")[1])
-    cat_id = user_states[uid]["cat"]
-    questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
-    if q_idx >= len(questions):
-        await callback.answer("Ошибка вопроса.")
-        return
-    question = questions[q_idx]
-    user_states[uid]["q"] = question["id"]
-
-    kb_rows = [
-        [
-            InlineKeyboardButton(text="👍 Помог", callback_data="helpful_yes"),
-            InlineKeyboardButton(text="👎 Не помог", callback_data="helpful_no")
-        ],
-        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
-    ]
-    if question.get("remind"):
-        kb_rows.insert(
-            1,
-            [InlineKeyboardButton(text="⏰ Напомнить", callback_data=f"remind_auto_{question['id']}")]
-        )
-    await callback.message.answer(question["answer"], parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data in {"helpful_yes", "helpful_no"})
-async def feedback(callback: CallbackQuery):
-    uid = callback.from_user.id
-    q = user_states.get(uid, {}).get("q", "unknown")
-    if callback.data == "helpful_yes":
-        stats["helpful"][str(q)] += 1
-        text = "✅ *Спасибо за обратную связь!*"
-    else:
-        stats["not_helpful"][str(q)] += 1
-        lines = ["😔 *К сожалению, не смог помочь.*", "", "📞 *HR-отдел:*"]
-        if HR_CONTACTS.get("email"):
-            lines.append(f"📧 *E-mail:* {HR_CONTACTS['email']}")
-        if HR_CONTACTS.get("phone"):
-            lines.append(f"📞 *Телефон:* {HR_CONTACTS['phone']}")
-        for tg in HR_CONTACTS.get("telegram", []):
-            if tg:
-                lines.append(f"💬 *Telegram:* {tg}")
-        text = "\n".join(lines)
-    save_stats(stats)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]])
-    await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "admin_stats")
-async def cb_admin_stats(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if uid not in ADMIN_IDS:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    not_help = stats["not_helpful"]
-    if not not_help:
-        txt = "📊 Пока ни одного «не помог»."
-    else:
-        top = not_help.most_common(5)
-        txt = "📉 ТОП-5 «не помог»:\n" + "\n".join(f"{i}. {q} — {cnt}" for i, (q, cnt) in enumerate(top, 1))
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]])
-    await callback.message.edit_text(txt, reply_markup=kb)
-    await callback.answer()
-
-# ---------- Reminder flows ----------
-@dp.callback_query(lambda c: c.data == "remind_start")
-async def remind_start(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-    await callback.message.edit_text(
-        "📅 Введите дату отправки напоминания в формате ДД.ММ.ГГГГ:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
-        )
-    )
-    user_states[uid] = {"wait_remind": "date"}
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "list_reminders")
-async def list_reminders(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-    lst = reminders.get(uid, [])
-    if not lst:
-        await callback.message.edit_text(
-            "📭 У вас нет активных напоминаний.",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
-            )
-        )
-        return await callback.answer()
-    kb_rows = []
-    for r in lst:
-        kb_rows.append([
-            InlineKeyboardButton(text=f"{r['dt_str']} – {r['text'][:30]}", callback_data="noop"),
-            InlineKeyboardButton(text="❌", callback_data=f"delrem_{r['id']}")
-        ])
-    kb_rows.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
-    await callback.message.edit_text("📋 Ваши напоминания:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("delrem_"))
-async def del_remind(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-    rid = int(callback.data.split("_")[1])
-    reminders[uid] = [r for r in reminders.get(uid, []) if r["id"] != rid]
-    save_reminders({k: v for k, v in reminders.items() if v})
-    await callback.answer("🗑 Удалено!")
-    await list_reminders(callback)
-
-@dp.callback_query(lambda c: c.data.startswith("remind_auto_"))
-async def remind_auto(callback: CallbackQuery):
-    uid = callback.from_user.id
-    if not allowed(uid):
-        return
-    qid = int(callback.data.replace("remind_auto_", ""))
-    question = next(
-        (q for cat in data["categories"] for q in cat["questions"] if q["id"] == qid),
-        {}
-    )
-    text = question.get("remind_text", "Напомнить")
-    await callback.message.edit_text(
-        f"📅 Введите дату напоминания «{text}» (ДД.ММ.ГГГГ):",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
-        )
-    )
-    user_states[uid] = {"wait_remind": "date", "remind_auto_text": text}
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "noop")
-async def noop(callback: CallbackQuery):
-    await callback.answer()
-
-@dp.message()
-async def handle_remind(msg: Message):
-    uid = msg.from_user.id
-    if not allowed(uid):
-        return
-    state = user_states.get(uid, {}).get("wait_remind")
-    if state == "date":
-        try:
-            datetime.strptime(msg.text, "%d.%m.%Y")
-        except ValueError:
-            await msg.answer("❗️ Неверный формат. Введите ДД.ММ.ГГГГ:")
-            return
-        user_states[uid]["wait_remind"] = "time"
-        user_states[uid]["remind_date"] = msg.text
-        await msg.answer("⏰ Введите время ЧЧ:ММ:")
-    elif state == "time":
-        try:
-            datetime.strptime(msg.text, "%H:%M")
-        except ValueError:
-            await msg.answer("❗️ Неверный формат. Введите ЧЧ:ММ:")
-            return
-        user_states[uid]["wait_remind"] = "text"
-        user_states[uid]["remind_time"] = msg.text
-        text = user_states[uid].get("remind_auto_text", "Напомнить")
-        await msg.answer(f"📝 Подтвердите текст:\n{text}")
-    elif state == "text":
-        dt_str = f"{user_states[uid]['remind_date']} {user_states[uid]['remind_time']}"
-        if datetime.strptime(dt_str, "%d.%m.%Y %H:%M") <= datetime.now():
-            await msg.answer("❗️ Укажите будущую дату и время.")
-            return
-        text = user_states[uid].get("remind_auto_text", msg.text)
-        reminders.setdefault(uid, []).append(
-            {"id": next_remind_id.next(), "dt_str": dt_str, "text": text}
-        )
-        save_reminders(reminders)
-        user_states[uid].pop("wait_remind", None)
-        await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
-
-# ---------- HTTP health check ----------
-routes = web.RouteTableDef()
-
-@routes.get('/')
-async def health(request):
-    return web.Response(text="OK")
-
-async def run_http():
-    app = web.Application()
-    app.add_routes(routes)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000))).start()
-
-# ---------- Entry point ----------
-async def main():
-    asyncio.create_task(reminder_worker())
-    await asyncio.gather(run_http(), dp.start_polling(bot, skip_updates=True))
-
-if __name__ == "__main__":
-    asyncio.run(main())
