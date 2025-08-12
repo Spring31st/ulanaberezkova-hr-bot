@@ -31,16 +31,12 @@ HR_CONTACTS = data["hr_contacts"]
 bot = Bot(token=TOKEN)
 dp  = Dispatcher()
 
-PAGE_SIZE      = 7
-STATS_FILE     = "stats.json"
-REMINDERS_FILE = "reminders.json"
+PAGE_SIZE  = 7
+STATS_FILE = "stats.json"
 
 # ---------- Helpers ----------
-def allowed(uid: int) -> bool:
-    return uid in ALLOWED_IDS
-
-def is_admin(uid: int) -> bool:
-    return uid in ADMIN_IDS
+def allowed(uid: int) -> bool:  return uid in ALLOWED_IDS
+def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
 
 # ---------- Stats ----------
 def load_stats() -> dict[str, Counter]:
@@ -48,61 +44,13 @@ def load_stats() -> dict[str, Counter]:
         return {"helpful": Counter(), "not_helpful": Counter()}
     with open(STATS_FILE, encoding='utf-8') as f:
         raw = json.load(f)
-    return {
-        "helpful":     Counter(raw["helpful"]),
-        "not_helpful": Counter(raw["not_helpful"])
-    }
+    return {"helpful": Counter(raw["helpful"]), "not_helpful": Counter(raw["not_helpful"])}
 
 def save_stats(stats: dict[str, Counter]) -> None:
     with open(STATS_FILE, 'w', encoding='utf-8') as f:
         json.dump({k: dict(v) for k, v in stats.items()}, f, ensure_ascii=False, indent=2)
 
 stats = load_stats()
-
-# ---------- Reminders ----------
-def load_reminders() -> dict[int, list[dict]]:
-    if not os.path.exists(REMINDERS_FILE):
-        return {}
-    with open(REMINDERS_FILE, encoding='utf-8') as f:
-        raw = json.load(f)
-    return {int(uid): lst for uid, lst in raw.items()}
-
-def save_reminders(reminders: dict[int, list[dict]]) -> None:
-    with open(REMINDERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(reminders, f, ensure_ascii=False, indent=2)
-
-reminders = load_reminders()
-
-class IdCounter:
-    def __init__(self, start: int):
-        self._value = start
-    def next(self) -> int:
-        val = self._value
-        self._value += 1
-        return val
-
-next_remind_id = IdCounter(
-    max([r["id"] for lst in reminders.values() for r in lst], default=0) + 1
-)
-
-# ---------- Background worker ----------
-async def reminder_worker():
-    await asyncio.sleep(5)
-    while True:
-        await asyncio.sleep(60)
-        now = datetime.now()
-        for uid, lst in list(reminders.items()):
-            still_active = []
-            for r in lst:
-                if datetime.strptime(r["dt_str"], "%d.%m.%Y %H:%M") <= now:
-                    try:
-                        await bot.send_message(uid, f"🔔 *Напоминание:*\n{r['text']}", parse_mode="Markdown")
-                    except Exception as e:
-                        logging.warning("Remind send failed to %s: %s", uid, e)
-                else:
-                    still_active.append(r)
-            reminders[uid] = still_active
-        save_reminders({k: v for k, v in reminders.items() if v})
 
 # ---------- Keyboard builders ----------
 def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
@@ -111,7 +59,6 @@ def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
     for idx, text in enumerate(items[start: start + PAGE_SIZE], start):
         kb.button(text=text, callback_data=f"{prefix}_{idx}")
     kb.adjust(1)
-
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"{prefix}_prev_{page - 1}"))
@@ -127,8 +74,7 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
         kb.append([InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")])
     kb.extend([
         [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="categories_0")],
-        [InlineKeyboardButton(text="📅 Создать напоминание", callback_data="remind_start")],
-        [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="list_reminders")]
+        [InlineKeyboardButton(text="📞 Контакты HR", callback_data="hr_contacts")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -146,32 +92,23 @@ async def cmd_start(msg: Message):
 @dp.callback_query(lambda c: c.data == "main_menu")
 async def cb_main_menu(callback: CallbackQuery):
     if not allowed(callback.from_user.id):
-        await callback.answer("Ошибка доступа")
         return
     await callback.message.edit_text("👋 Что вас интересует?", reply_markup=main_menu_kb(callback.from_user.id))
     await callback.answer()
 
+# --- Categories ---
 @dp.callback_query(lambda c: c.data.startswith("categories_"))
 async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     parts = callback.data.split("_")
-    if parts[1] in ("prev", "next"):
-        page = int(parts[2])
-    else:
-        page = int(parts[1])
-
+    page = int(parts[2]) if parts[1] in {"prev", "next"} else int(parts[1])
     cat_names = [
         c["name"] for c in data["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
-
-    await callback.message.edit_text(
-        "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "category")
-    )
+    await callback.message.edit_text("📂 Выберите категорию:", reply_markup=paginate(cat_names, page, "category"))
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("category_"))
@@ -179,11 +116,10 @@ async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     try:
         cat_idx = int(callback.data.split("_")[1])
     except (IndexError, ValueError):
-        await callback.answer("Ошибка обработки категории.")
+        await callback.answer("Ошибка.")
         return
 
     categories = [
@@ -197,10 +133,9 @@ async def pick_category(callback: CallbackQuery):
     category = categories[cat_idx]
     user_states[uid] = {"cat": category["id"]}
 
-    question_titles = [q["question"] for q in category["questions"]]
-    kb = paginate(question_titles, 0, "q")
+    titles = [q["question"] for q in category["questions"]]
+    kb = paginate(titles, 0, "q")
     kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
-
     await callback.message.edit_text(
         f"📂 *{category['name']}*\n\nВыберите вопрос:",
         parse_mode="Markdown",
@@ -208,16 +143,16 @@ async def pick_category(callback: CallbackQuery):
     )
     await callback.answer()
 
+# --- Questions ---
 @dp.callback_query(lambda c: c.data.startswith("q_"))
 async def show_question(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     try:
         q_idx = int(callback.data.split("_")[1])
     except (IndexError, ValueError):
-        await callback.answer("Ошибка обработки вопроса.")
+        await callback.answer("Ошибка.")
         return
 
     state = user_states.get(uid)
@@ -237,20 +172,77 @@ async def show_question(callback: CallbackQuery):
         return
 
     question = questions[q_idx]
+    stats_key = f"{category_id}_{q_idx}"
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="👍 Полезно",  callback_data=f"rate_1_{category_id}_{q_idx}")],
-            [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{category_id}_{q_idx}")],
+            [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
+            [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="category_0")],
         ]
     )
-
     await callback.message.edit_text(
         f"❓ *{question['question']}*\n\n{question['answer']}",
         parse_mode="Markdown",
-        reply_markup=kb
+        reply_markup=kb,
+        disable_web_page_preview=True
     )
+    await callback.answer()
+
+# --- Rate & Stats ---
+@dp.callback_query(lambda c: c.data.startswith("rate_"))
+async def rate_answer(callback: CallbackQuery):
+    _, flag, key = callback.data.split("_", 2)
+    cat_id, q_id = key.split("_")
+    if flag == "1":
+        stats["helpful"][key] += 1
+    else:
+        stats["not_helpful"][key] += 1
+    save_stats(stats)
+    await callback.answer("Спасибо за обратную связь!")
+
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not is_admin(uid):
+        await callback.answer("Нет доступа.")
+        return
+
+    if not stats["helpful"] and not stats["not_helpful"]:
+        text = "📊 Статистика пуста."
+    else:
+        lines = ["📊 Статистика по ответам:"]
+        for key in set(stats["helpful"]) | set(stats["not_helpful"]):
+            cat_id, q_id = key.split("_")
+            category = next(c for c in data["categories"] if str(c["id"]) == cat_id)
+            question = category["questions"][int(q_id)]
+            useful = stats["helpful"][key]
+            useless = stats["not_helpful"][key]
+            lines.append(f"{question['question'][:40]}… — 👍{useful} 👎{useless}")
+        text = "\n".join(lines)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
+    )
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+# --- HR Contacts ---
+@dp.callback_query(lambda c: c.data == "hr_contacts")
+async def show_hr_contacts(callback: CallbackQuery):
+    if not allowed(callback.from_user.id):
+        return
+    contacts = HR_CONTACTS
+    text = (
+        "📞 Контакты HR-отдела:\n\n"
+        f"📧 Email: {contacts['email']}\n"
+        f"📞 Телефон: {contacts['phone']}\n"
+        f"💬 Telegram: {', '.join(contacts['telegram'])}"
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
+    )
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 # ---------- HTTP health check ----------
@@ -272,7 +264,6 @@ async def run_http():
 # ---------- Entry point ----------
 async def main():
     await run_http()
-    asyncio.create_task(reminder_worker())
     await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
