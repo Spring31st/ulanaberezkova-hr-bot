@@ -131,8 +131,14 @@ async def pick_question(callback: CallbackQuery):
     await callback.message.answer(question["answer"], parse_mode=PARSE_MODE, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     await callback.answer()
 
-for cb in ("admin_stats", "remind_start", "list_reminders"):
-    dp.callback_query.register(globals()[f"cb_{cb}"], lambda c, cb=cb: c.data == cb)
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery): ...
+
+@dp.callback_query(lambda c: c.data == "remind_start")
+async def remind_start(callback: CallbackQuery): ...
+
+@dp.callback_query(lambda c: c.data == "list_reminders")
+async def list_reminders(callback: CallbackQuery): ...
 
 @dp.callback_query(lambda c: c.data.startswith("delrem_"))
 async def del_remind(callback: CallbackQuery):
