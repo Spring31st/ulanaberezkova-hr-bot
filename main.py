@@ -166,7 +166,7 @@ async def show_categories(callback: CallbackQuery):
     # ✅ Ключевое исправление: используем префикс "category" (без s), а не "categories"
     await callback.message.edit_text(
         "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "category")  # ← здесь было "categories", теперь "category"
+        reply_markup=paginate(cat_names, page, "category") 
     )
     await callback.answer()
 
