@@ -11,7 +11,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 from collections import Counter
 
-# ---------- Logging ----------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -23,7 +22,7 @@ with open('data.json', encoding='utf-8') as f:
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_IDS = set(data["allowed_user_ids"])
-ADMIN_IDS   = set(data["admin_ids"])
+ADMIN_IDS = set(data["admin_ids"])
 HR_CONTACTS = data["hr_contacts"]
 
 bot = Bot(token=TOKEN)
@@ -33,9 +32,11 @@ PAGE_SIZE = 7
 STATS_FILE = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
-# ---------- Helpers ----------
-def allowed(uid: int) -> bool: return uid in ALLOWED_IDS
-def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
+def allowed(uid: int) -> bool:
+    return uid in ALLOWED_IDS
+
+def is_admin(uid: int) -> bool:
+    return uid in ADMIN_IDS
 
 # ---------- Stats ----------
 def load_stats() -> dict[str, Counter]:
@@ -66,7 +67,6 @@ def save_reminders(reminders: dict[int, list[dict]]) -> None:
 
 reminders = load_reminders()
 
-# Atomic counter for reminder IDs
 class IdCounter:
     def __init__(self, start: int):
         self._value = start
@@ -166,15 +166,17 @@ async def pick_category(callback: CallbackQuery):
         _, _, page = callback.data.split("_")
         cat_names = [
             c["name"] for c in data["categories"]
-            if not c.get("admin_only") or is_admin(uid)
+            if not c.get("admin_only", False) or is_admin(uid)
         ]
+        logging.info("Visible categories for %s: %s", uid, cat_names)
         await callback.message.edit_reply_markup(reply_markup=paginate(cat_names, int(page), "cat"))
         return await callback.answer()
     cat_idx = int(callback.data.split("_")[1])
     categories = [
         c for c in data["categories"]
-        if not c.get("admin_only") or is_admin(uid)
+        if not c.get("admin_only", False) or is_admin(uid)
     ]
+    logging.info("Filtered categories for %s: %s", uid, [c["name"] for c in categories])
     if cat_idx >= len(categories):
         await callback.answer("Ошибка категории.")
         return
