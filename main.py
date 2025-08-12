@@ -32,11 +32,9 @@ PAGE_SIZE = 7
 STATS_FILE = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
-def allowed(uid: int) -> bool:
-    return uid in ALLOWED_IDS
-
-def is_admin(uid: int) -> bool:
-    return uid in ADMIN_IDS
+# ---------- Helpers ----------
+def allowed(uid: int) -> bool: return uid in ALLOWED_IDS
+def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
 
 # ---------- Stats ----------
 def load_stats() -> dict[str, Counter]:
@@ -120,7 +118,7 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     if is_admin(uid):
         kb.append([InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")])
     kb.extend([
-        [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="cat_show_0")],
+        [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="categories_0")],
         [InlineKeyboardButton(text="📅 Создать напоминание", callback_data="remind_start")],
         [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="list_reminders")]
     ])
@@ -144,20 +142,7 @@ async def cb_main_menu(callback: CallbackQuery):
     await callback.message.edit_text("👋 Что вас интересует?", reply_markup=main_menu_kb(callback.from_user.id))
     await callback.answer()
 
-@dp.message(Command("stats"))
-async def cmd_stats(msg: Message):
-    if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Команда доступна только админам.")
-        return
-    not_help = stats["not_helpful"]
-    if not not_help:
-        await msg.answer("📊 Пока ни одного «не помог».")
-        return
-    top = not_help.most_common(5)
-    lines = [f"{idx + 1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top, 1)]
-    await msg.answer("📉 ТОП-5 «не помог»:\n" + "\n".join(lines))
-
-@dp.callback_query(lambda c: c.data.startswith("cat_show_"))
+@dp.callback_query(lambda c: c.data.startswith("categories_"))
 async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
@@ -170,11 +155,11 @@ async def show_categories(callback: CallbackQuery):
     ]
     await callback.message.edit_text(
         "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "cat")
+        reply_markup=paginate(cat_names, page, "categories")
     )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("cat_") and not c.data.startswith("cat_"))
+@dp.callback_query(lambda c: c.data.startswith("category_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
