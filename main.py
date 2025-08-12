@@ -178,7 +178,7 @@ async def pick_category(callback: CallbackQuery):
         return
     category = categories[cat_idx]
     user_states[uid] = {"cat": category["id"]}
-    kb = paginate([q["question"] for q in category["questions"]], 0, "q")
+    kb = paginate([q["question"] for q in category["questions"]], 0, "category")
     kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
     await callback.message.edit_text(
         f"📂 *{category['name']}*\n\nВыберите вопрос:",
