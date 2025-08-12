@@ -147,7 +147,7 @@ async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    _, page = callback.data.split("_")
+    prefix, *rest = callback.data.split("_") page = int(rest[0])
     page = int(page)
     cat_names = [
         c["name"] for c in data["categories"]
@@ -189,7 +189,8 @@ async def pick_question(callback: CallbackQuery):
     if not allowed(uid):
         return
     if callback.data.startswith(("q_prev_", "q_next_")):
-        _, _, page = callback.data.split("_")
+        prefix, *rest = callback.data.split("_")
+page = int(rest[0])
         cat_id = user_states.get(uid, {}).get("cat")
         questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
         q_titles = [q["question"] for q in questions]
