@@ -3,7 +3,7 @@ import os
 import json
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -22,24 +22,23 @@ with open('data.json', encoding='utf-8') as f:
     data = json.load(f)
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_IDS = data["allowed_user_ids"]
-ADMIN_IDS = data["admin_ids"]
+ALLOWED_IDS = set(data["allowed_user_ids"])
+ADMIN_IDS   = set(data["admin_ids"])
 HR_CONTACTS = data["hr_contacts"]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-user_states = {}
 PAGE_SIZE = 7
 STATS_FILE = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
 # ---------- Helpers ----------
-def allowed(uid):  return uid in ALLOWED_IDS
-def is_admin(uid): return uid in ADMIN_IDS
+def allowed(uid: int) -> bool: return uid in ALLOWED_IDS
+def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
 
 # ---------- Stats ----------
-def load_stats():
+def load_stats() -> dict[str, Counter]:
     if not os.path.exists(STATS_FILE):
         return {"helpful": Counter(), "not_helpful": Counter()}
     with open(STATS_FILE, encoding='utf-8') as f:
@@ -47,53 +46,64 @@ def load_stats():
     return {"helpful": Counter(raw["helpful"]),
             "not_helpful": Counter(raw["not_helpful"])}
 
-def save_stats(stats):
+def save_stats(stats: dict[str, Counter]) -> None:
     with open(STATS_FILE, 'w', encoding='utf-8') as f:
         json.dump({k: dict(v) for k, v in stats.items()}, f, ensure_ascii=False, indent=2)
 
 stats = load_stats()
 
 # ---------- Reminders ----------
-def load_reminders():
+def load_reminders() -> dict[int, list[dict]]:
     if not os.path.exists(REMINDERS_FILE):
         return {}
     with open(REMINDERS_FILE, encoding='utf-8') as f:
         raw = json.load(f)
     return {int(uid): lst for uid, lst in raw.items()}
 
-def save_reminders(reminders):
+def save_reminders(reminders: dict[int, list[dict]]) -> None:
     with open(REMINDERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(reminders, f, ensure_ascii=False, indent=2)
 
 reminders = load_reminders()
-next_remind_id = max([r["id"] for lst in reminders.values() for r in lst], default=0) + 1
 
+# Atomic counter for reminder IDs
+class IdCounter:
+    def __init__(self, start: int):
+        self._value = start
+    def next(self) -> int:
+        val = self._value
+        self._value += 1
+        return val
+
+next_remind_id = IdCounter(
+    max([r["id"] for lst in reminders.values() for r in lst], default=0) + 1
+)
+
+# ---------- Background worker ----------
 async def reminder_worker():
-    global reminders, next_remind_id
-    await asyncio.sleep(5)  # даём время на старт поллингу
+    await asyncio.sleep(5)   # let polling start
     while True:
         await asyncio.sleep(60)
         now = datetime.now()
         for uid, lst in list(reminders.items()):
             still_active = []
             for r in lst:
-                dt = datetime.strptime(r["dt_str"], "%d.%m.%Y %H:%M")
-                if dt <= now:
+                if datetime.strptime(r["dt_str"], "%d.%m.%Y %H:%M") <= now:
                     try:
                         await bot.send_message(uid, f"🔔 *Напоминание:*\n{r['text']}", parse_mode="Markdown")
                     except Exception as e:
-                        logging.warning(f"Не удалось отправить напоминание {uid}: {e}")
+                        logging.warning(f"Remind send failed to {uid}: {e}")
                 else:
                     still_active.append(r)
             reminders[uid] = still_active
-        reminders = {k: v for k, v in reminders.items() if v}
+        reminders.update({k: v for k, v in reminders.items() if v})
         save_reminders(reminders)
 
-# ---------- Paginate ----------
-def paginate(items, page, prefix):
+# ---------- Keyboard builders ----------
+def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     start = page * PAGE_SIZE
-    for idx, text in enumerate(items[start:start + PAGE_SIZE], start):
+    for idx, text in enumerate(items[start: start + PAGE_SIZE], start):
         kb.button(text=text, callback_data=f"{prefix}_{idx}")
     kb.adjust(1)
     nav = []
@@ -105,10 +115,9 @@ def paginate(items, page, prefix):
         kb.row(*nav)
     return kb.as_markup()
 
-# ---------- Menu ----------
 def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     kb = []
-    if uid in ADMIN_IDS:
+    if is_admin(uid):
         kb.append([InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")])
     kb.extend([
         [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="cat_0")],
@@ -116,6 +125,9 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="list_reminders")]
     ])
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+# ---------- States ----------
+user_states: dict[int, dict] = {}
 
 # ---------- Handlers ----------
 @dp.message(Command("start"))
@@ -154,17 +166,17 @@ async def pick_category(callback: CallbackQuery):
         _, _, page = callback.data.split("_")
         cat_names = [
             c["name"] for c in data["categories"]
-            if not c.get("admin_only") or uid in ADMIN_IDS
+            if not c.get("admin_only") or is_admin(uid)
         ]
         await callback.message.edit_reply_markup(reply_markup=paginate(cat_names, int(page), "cat"))
         return await callback.answer()
     cat_idx = int(callback.data.split("_")[1])
     categories = [
         c for c in data["categories"]
-        if not c.get("admin_only") or uid in ADMIN_IDS
+        if not c.get("admin_only") or is_admin(uid)
     ]
     if cat_idx >= len(categories):
-        await callback.answer("Ошибка выбора категории.")
+        await callback.answer("Ошибка категории.")
         return
     category = categories[cat_idx]
     user_states[uid] = {"cat": category["id"]}
@@ -193,7 +205,7 @@ async def pick_question(callback: CallbackQuery):
     cat_id = user_states[uid]["cat"]
     questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
     if q_idx >= len(questions):
-        await callback.answer("Ошибка выбора вопроса.")
+        await callback.answer("Ошибка вопроса.")
         return
     question = questions[q_idx]
     user_states[uid]["q"] = question["id"]
@@ -207,10 +219,7 @@ async def pick_question(callback: CallbackQuery):
     if question.get("remind"):
         kb_rows.insert(
             1,
-            [InlineKeyboardButton(
-                text="⏰ Напомнить",
-                callback_data=f"remind_auto_{question['remind_text']}"
-            )]
+            [InlineKeyboardButton(text="⏰ Напомнить", callback_data=f"remind_auto_{question['remind_text']}")]
         )
     await callback.message.answer(question["answer"], parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     await callback.answer()
@@ -254,7 +263,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.message.edit_text(txt, reply_markup=kb)
     await callback.answer()
 
-# ---------- Reminders ----------
+# ---------- Reminder flows ----------
 @dp.callback_query(lambda c: c.data == "remind_start")
 async def remind_start(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -295,7 +304,6 @@ async def list_reminders(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("delrem_"))
 async def del_remind(callback: CallbackQuery):
-    global reminders
     uid = callback.from_user.id
     if not allowed(uid):
         return
@@ -357,15 +365,13 @@ async def handle_remind(msg: Message):
             return
         text = user_states[uid].get("remind_auto_text", msg.text)
         reminders.setdefault(uid, []).append(
-            {"id": next_remind_id, "dt_str": dt_str, "text": text}
+            {"id": next_remind_id.next(), "dt_str": dt_str, "text": text}
         )
-        global next_remind_id
-        next_remind_id += 1
         save_reminders(reminders)
         del user_states[uid]["wait_remind"]
         await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
 
-# ---------- HTTP ----------
+# ---------- HTTP health check ----------
 routes = web.RouteTableDef()
 
 @routes.get('/')
@@ -379,7 +385,7 @@ async def run_http():
     await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000))).start()
 
-# ---------- Main ----------
+# ---------- Entry point ----------
 async def main():
     asyncio.create_task(reminder_worker())
     await asyncio.gather(run_http(), dp.start_polling(bot, skip_updates=True))
