@@ -81,7 +81,7 @@ next_remind_id = IdCounter(
 
 # ---------- Background worker ----------
 async def reminder_worker():
-    await asyncio.sleep(5)   # let polling start
+    await asyncio.sleep(5)
     while True:
         await asyncio.sleep(60)
         now = datetime.now()
@@ -209,6 +209,7 @@ async def pick_question(callback: CallbackQuery):
         return
     question = questions[q_idx]
     user_states[uid]["q"] = question["id"]
+
     kb_rows = [
         [
             InlineKeyboardButton(text="👍 Помог", callback_data="helpful_yes"),
@@ -219,7 +220,7 @@ async def pick_question(callback: CallbackQuery):
     if question.get("remind"):
         kb_rows.insert(
             1,
-            [InlineKeyboardButton(text="⏰ Напомнить", callback_data=f"remind_auto_{question['remind_text']}")]
+            [InlineKeyboardButton(text="⏰ Напомнить", callback_data=f"remind_auto_{question['id']}")]
         )
     await callback.message.answer(question["answer"], parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     await callback.answer()
@@ -319,7 +320,12 @@ async def remind_auto(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    text = callback.data.replace("remind_auto_", "")
+    qid = int(callback.data.replace("remind_auto_", ""))
+    question = next(
+        (q for cat in data["categories"] for q in cat["questions"] if q["id"] == qid),
+        {}
+    )
+    text = question.get("remind_text", "Напомнить")
     await callback.message.edit_text(
         f"📅 Введите дату напоминания «{text}» (ДД.ММ.ГГГГ):",
         reply_markup=InlineKeyboardMarkup(
