@@ -21,15 +21,18 @@ with open('data.json', encoding='utf-8') as f:
     data = json.load(f)
 
 TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    raise RuntimeError("TOKEN not set in environment")
+
 ALLOWED_IDS = set(data["allowed_user_ids"])
-ADMIN_IDS = set(data["admin_ids"])
+ADMIN_IDS   = set(data["admin_ids"])
 HR_CONTACTS = data["hr_contacts"]
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp  = Dispatcher()
 
-PAGE_SIZE = 7
-STATS_FILE = "stats.json"
+PAGE_SIZE      = 7
+STATS_FILE     = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
 # ---------- Helpers ----------
@@ -46,7 +49,7 @@ def load_stats() -> dict[str, Counter]:
     with open(STATS_FILE, encoding='utf-8') as f:
         raw = json.load(f)
     return {
-        "helpful": Counter(raw["helpful"]),
+        "helpful":     Counter(raw["helpful"]),
         "not_helpful": Counter(raw["not_helpful"])
     }
 
@@ -95,7 +98,7 @@ async def reminder_worker():
                     try:
                         await bot.send_message(uid, f"🔔 *Напоминание:*\n{r['text']}", parse_mode="Markdown")
                     except Exception as e:
-                        logging.warning(f"Remind send failed to {uid}: {e}")
+                        logging.warning("Remind send failed to %s: %s", uid, e)
                 else:
                     still_active.append(r)
             reminders[uid] = still_active
@@ -108,6 +111,7 @@ def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
     for idx, text in enumerate(items[start: start + PAGE_SIZE], start):
         kb.button(text=text, callback_data=f"{prefix}_{idx}")
     kb.adjust(1)
+
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"{prefix}_prev_{page - 1}"))
@@ -142,6 +146,7 @@ async def cmd_start(msg: Message):
 @dp.callback_query(lambda c: c.data == "main_menu")
 async def cb_main_menu(callback: CallbackQuery):
     if not allowed(callback.from_user.id):
+        await callback.answer("Ошибка доступа")
         return
     await callback.message.edit_text("👋 Что вас интересует?", reply_markup=main_menu_kb(callback.from_user.id))
     await callback.answer()
@@ -163,10 +168,9 @@ async def show_categories(callback: CallbackQuery):
         if not c.get("admin_only", False) or is_admin(uid)
     ]
 
-    # ✅ Ключевое исправление: используем префикс "category" (без s), а не "categories"
     await callback.message.edit_text(
         "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "category") 
+        reply_markup=paginate(cat_names, page, "category")
     )
     await callback.answer()
 
@@ -194,7 +198,7 @@ async def pick_category(callback: CallbackQuery):
     user_states[uid] = {"cat": category["id"]}
 
     question_titles = [q["question"] for q in category["questions"]]
-    kb = paginate(question_titles, 0, "q")  # префикс "q" для вопросов
+    kb = paginate(question_titles, 0, "q")
     kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
 
     await callback.message.edit_text(
@@ -203,3 +207,76 @@ async def pick_category(callback: CallbackQuery):
         reply_markup=kb
     )
     await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("q_"))
+async def show_question(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not allowed(uid):
+        return
+
+    try:
+        q_idx = int(callback.data.split("_")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка обработки вопроса.")
+        return
+
+    state = user_states.get(uid)
+    if not state or "cat" not in state:
+        await callback.answer("Сессия устарела.")
+        return
+
+    category_id = state["cat"]
+    category = next((c for c in data["categories"] if c["id"] == category_id), None)
+    if not category:
+        await callback.answer("Категория не найдена.")
+        return
+
+    questions = category["questions"]
+    if q_idx >= len(questions):
+        await callback.answer("Ошибка вопроса.")
+        return
+
+    question = questions[q_idx]
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👍 Полезно",  callback_data=f"rate_1_{category_id}_{q_idx}")],
+            [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{category_id}_{q_idx}")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="category_0")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        f"❓ *{question['question']}*\n\n{question['answer']}",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+# ---------- HTTP health check ----------
+routes = web.RouteTableDef()
+
+@routes.get('/')
+async def health(request):
+    return web.Response(text="OK")
+
+async def run_http():
+    app = web.Application()
+    app.add_routes(routes)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    await web.TCPSite(runner, '0.0.0.0', port).start()
+    logging.info("HTTP server started on 0.0.0.0:%s", port)
+
+# ---------- Entry point ----------
+async def main():
+    await run_http()
+    asyncio.create_task(reminder_worker())
+    await dp.start_polling(bot, skip_updates=True)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logging.error("Fatal error: %s", e)
