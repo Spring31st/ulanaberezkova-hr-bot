@@ -120,7 +120,7 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     if is_admin(uid):
         kb.append([InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")])
     kb.extend([
-        [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="cat_0")],
+        [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="cat_show_0")],
         [InlineKeyboardButton(text="📅 Создать напоминание", callback_data="remind_start")],
         [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="list_reminders")]
     ])
@@ -157,26 +157,33 @@ async def cmd_stats(msg: Message):
     lines = [f"{idx + 1}. {q} — {cnt}" for idx, (q, cnt) in enumerate(top, 1)]
     await msg.answer("📉 ТОП-5 «не помог»:\n" + "\n".join(lines))
 
-@dp.callback_query(lambda c: c.data.startswith("cat_"))
+@dp.callback_query(lambda c: c.data.startswith("cat_show_"))
+async def show_categories(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if not allowed(uid):
+        return
+    _, page = callback.data.split("_")
+    page = int(page)
+    cat_names = [
+        c["name"] for c in data["categories"]
+        if not c.get("admin_only", False) or is_admin(uid)
+    ]
+    await callback.message.edit_text(
+        "📂 Выберите категорию:",
+        reply_markup=paginate(cat_names, page, "cat")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("cat_") and not c.data.startswith("cat_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    if callback.data.startswith(("cat_prev_", "cat_next_")):
-        _, _, page = callback.data.split("_")
-        cat_names = [
-            c["name"] for c in data["categories"]
-            if not c.get("admin_only", False) or is_admin(uid)
-        ]
-        logging.info("Visible categories for %s: %s", uid, cat_names)
-        await callback.message.edit_reply_markup(reply_markup=paginate(cat_names, int(page), "cat"))
-        return await callback.answer()
     cat_idx = int(callback.data.split("_")[1])
     categories = [
         c for c in data["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
-    logging.info("Filtered categories for %s: %s", uid, [c["name"] for c in categories])
     if cat_idx >= len(categories):
         await callback.answer("Ошибка категории.")
         return
