@@ -33,8 +33,11 @@ STATS_FILE = "stats.json"
 REMINDERS_FILE = "reminders.json"
 
 # ---------- Helpers ----------
-def allowed(uid: int) -> bool: return uid in ALLOWED_IDS
-def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
+def allowed(uid: int) -> bool:
+    return uid in ALLOWED_IDS
+
+def is_admin(uid: int) -> bool:
+    return uid in ADMIN_IDS
 
 # ---------- Stats ----------
 def load_stats() -> dict[str, Counter]:
@@ -42,8 +45,10 @@ def load_stats() -> dict[str, Counter]:
         return {"helpful": Counter(), "not_helpful": Counter()}
     with open(STATS_FILE, encoding='utf-8') as f:
         raw = json.load(f)
-    return {"helpful": Counter(raw["helpful"]),
-            "not_helpful": Counter(raw["not_helpful"])}
+    return {
+        "helpful": Counter(raw["helpful"]),
+        "not_helpful": Counter(raw["not_helpful"])
+    }
 
 def save_stats(stats: dict[str, Counter]) -> None:
     with open(STATS_FILE, 'w', encoding='utf-8') as f:
@@ -94,8 +99,7 @@ async def reminder_worker():
                 else:
                     still_active.append(r)
             reminders[uid] = still_active
-        reminders.update({k: v for k, v in reminders.items() if v})
-        save_reminders(reminders)
+        save_reminders({k: v for k, v in reminders.items() if v})
 
 # ---------- Keyboard builders ----------
 def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
@@ -147,8 +151,8 @@ async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-    prefix, *rest = callback.data.split("_") page = int(rest[0])
-    page = int(page)
+    prefix, *rest = callback.data.split("_")
+    page = int(rest[0])
     cat_names = [
         c["name"] for c in data["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
@@ -188,14 +192,16 @@ async def pick_question(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     if callback.data.startswith(("q_prev_", "q_next_")):
         prefix, *rest = callback.data.split("_")
-page = int(rest[0])
+        page = int(rest[-1])
         cat_id = user_states.get(uid, {}).get("cat")
         questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
         q_titles = [q["question"] for q in questions]
-        await callback.message.edit_reply_markup(reply_markup=paginate(q_titles, int(page), "q"))
+        await callback.message.edit_reply_markup(reply_markup=paginate(q_titles, page, "q"))
         return await callback.answer()
+
     q_idx = int(callback.data.split("_")[1])
     cat_id = user_states[uid]["cat"]
     questions = next((c for c in data["categories"] if c["id"] == cat_id), {}).get("questions", [])
@@ -305,8 +311,7 @@ async def del_remind(callback: CallbackQuery):
         return
     rid = int(callback.data.split("_")[1])
     reminders[uid] = [r for r in reminders.get(uid, []) if r["id"] != rid]
-    reminders = {k: v for k, v in reminders.items() if v}
-    save_reminders(reminders)
+    save_reminders({k: v for k, v in reminders.items() if v})
     await callback.answer("🗑 Удалено!")
     await list_reminders(callback)
 
@@ -369,7 +374,7 @@ async def handle_remind(msg: Message):
             {"id": next_remind_id.next(), "dt_str": dt_str, "text": text}
         )
         save_reminders(reminders)
-        del user_states[uid]["wait_remind"]
+        user_states[uid].pop("wait_remind", None)
         await msg.answer("✅ Напоминание сохранено!", reply_markup=main_menu_kb(uid))
 
 # ---------- HTTP health check ----------
