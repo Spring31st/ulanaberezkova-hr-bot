@@ -6,10 +6,8 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 from collections import Counter
-import logging.config
 
 logging.basicConfig(level=logging.INFO)
-
 with open('data.json', encoding='utf-8') as f:
     data = json.load(f)
 
@@ -21,15 +19,15 @@ HR_CONTACTS   = data["hr_contacts"]
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-user_states = {}
-PAGE_SIZE = 7
-STATS_FILE  = "stats.json"
-REMINDERS_FILE = "reminders.json"
+user_states   = {}
+PAGE_SIZE     = 7
+STATS_FILE    = "stats.json"
+REMINDERS_FILE= "reminders.json"
 
 def allowed(uid):  return uid in ALLOWED_IDS
 def is_admin(uid): return uid in ADMIN_IDS
 
-# ---------------- Stats ----------------
+# ---------- Stats ----------
 def load_stats():
     if not os.path.exists(STATS_FILE):
         return {"helpful": Counter(), "not_helpful": Counter()}
@@ -41,10 +39,9 @@ def load_stats():
 def save_stats(stats):
     with open(STATS_FILE, 'w', encoding='utf-8') as f:
         json.dump({k: dict(v) for k, v in stats.items()}, f, ensure_ascii=False, indent=2)
-
 stats = load_stats()
 
-# ---------------- Reminders --------------
+# ---------- Reminders ----------
 def load_reminders():
     if not os.path.exists(REMINDERS_FILE):
         return {}
@@ -79,7 +76,7 @@ async def reminder_worker():
         reminders = {k: v for k, v in reminders.items() if v}
         save_reminders(reminders)
 
-# ---------------- Paginate ----------------
+# ---------- Paginate ----------
 def paginate(items, page, prefix):
     kb = InlineKeyboardBuilder()
     for idx, text in enumerate(items[page*PAGE_SIZE:page*PAGE_SIZE+PAGE_SIZE], page*PAGE_SIZE):
@@ -94,7 +91,7 @@ def paginate(items, page, prefix):
         kb.row(*nav)
     return kb.as_markup()
 
-# ---------------- Menu ----------------
+# ---------- Menu ----------
 def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     kb = []
     if uid in ADMIN_IDS:
@@ -106,7 +103,7 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-# ---------------- Handlers ----------------
+# ---------- Handlers ----------
 @dp.message(Command("start"))
 async def cmd_start(msg: Message):
     if not allowed(msg.from_user.id):
@@ -206,6 +203,7 @@ async def feedback(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     await callback.answer()
 
+# ---------- Admin stats ----------
 @dp.callback_query(lambda c: c.data == "admin_stats")
 async def cb_admin_stats(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -222,6 +220,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.message.edit_text(txt, reply_markup=kb)
     await callback.answer()
 
+# ---------- Reminders ----------
 @dp.callback_query(lambda c: c.data == "remind_start")
 async def remind_start(callback: CallbackQuery):
     uid = callback.from_user.id
