@@ -190,7 +190,7 @@ async def show_question(callback: CallbackQuery):
         inline_keyboard=[
             [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
             [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data=f"category_{category_id}")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
         ]
     )
     await callback.message.edit_text(
