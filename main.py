@@ -174,13 +174,13 @@ async def show_question(callback: CallbackQuery):
     question = questions[q_idx]
     stats_key = f"{category_id}_{q_idx}"
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
-            [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="category_0")],
-        ]
-    )
+kb = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
+        [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"category_{category_id}")],
+    ]
+)
     await callback.message.edit_text(
         f"❓ *{question['question']}*\n\n{question['answer']}",
         parse_mode="Markdown",
