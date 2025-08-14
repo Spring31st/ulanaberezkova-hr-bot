@@ -17,16 +17,16 @@ logging.basicConfig(
 )
 
 # ---------- Config ----------
-with open('data.json', encoding='utf-8') as f:
-    data = json.load(f)
+with open("data.json", encoding="utf-8") as f:
+    DATA = json.load(f)
 
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     raise RuntimeError("TOKEN not set in environment")
 
-ALLOWED_IDS = set(data["allowed_user_ids"])
-ADMIN_IDS   = set(data["admin_ids"])
-HR_CONTACTS = data["hr_contacts"]
+ALLOWED_IDS = set(DATA["allowed_user_ids"])
+ADMIN_IDS   = set(DATA["admin_ids"])
+HR_CONTACTS = DATA["hr_contacts"]
 
 bot = Bot(token=TOKEN)
 dp  = Dispatcher()
@@ -35,19 +35,22 @@ PAGE_SIZE  = 7
 STATS_FILE = "stats.json"
 
 # ---------- Helpers ----------
-def allowed(uid: int) -> bool:  return uid in ALLOWED_IDS
-def is_admin(uid: int) -> bool: return uid in ADMIN_IDS
+def allowed(uid: int) -> bool:
+    return uid in ALLOWED_IDS
+
+def is_admin(uid: int) -> bool:
+    return uid in ADMIN_IDS
 
 # ---------- Stats ----------
 def load_stats() -> dict[str, Counter]:
     if not os.path.exists(STATS_FILE):
         return {"helpful": Counter(), "not_helpful": Counter()}
-    with open(STATS_FILE, encoding='utf-8') as f:
+    with open(STATS_FILE, encoding="utf-8") as f:
         raw = json.load(f)
     return {"helpful": Counter(raw["helpful"]), "not_helpful": Counter(raw["not_helpful"])}
 
 def save_stats(stats: dict[str, Counter]) -> None:
-    with open(STATS_FILE, 'w', encoding='utf-8') as f:
+    with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump({k: dict(v) for k, v in stats.items()}, f, ensure_ascii=False, indent=2)
 
 stats = load_stats()
@@ -56,9 +59,10 @@ stats = load_stats()
 def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     start = page * PAGE_SIZE
-    for idx, text in enumerate(items[start: start + PAGE_SIZE], start):
+    for idx, text in enumerate(items[start : start + PAGE_SIZE], start):
         kb.button(text=text, callback_data=f"{prefix}_{idx}")
     kb.adjust(1)
+
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"{prefix}_prev_{page - 1}"))
@@ -102,36 +106,43 @@ async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     parts = callback.data.split("_")
-    page = int(parts[2]) if parts[1] in {"prev", "next"} else int(parts[1])
+    page = int(parts[-1]) if parts[-2] in {"prev", "next"} else int(parts[-1])
+
     cat_names = [
-        c["name"] for c in data["categories"]
+        c["name"] for c in DATA["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
-    await callback.message.edit_text("📂 Выберите категорию:", reply_markup=paginate(cat_names, page, "category"))
+    await callback.message.edit_text(
+        "📂 Выберите категорию:",
+        reply_markup=paginate(cat_names, page, "category")
+    )
     await callback.answer()
 
+# --- Pick category ---
 @dp.callback_query(lambda c: c.data.startswith("category_"))
 async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     try:
-        cat_idx = int(callback.data.split("_")[1])
+        cat_idx = int(callback.data.split("_")[-1])
     except (IndexError, ValueError):
         await callback.answer("Ошибка.")
         return
 
-    categories = [
-        c for c in data["categories"]
+    visible_categories = [
+        c for c in DATA["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
-    if cat_idx >= len(categories):
-        await callback.answer("Ошибка категории.")
+    if cat_idx >= len(visible_categories):
+        await callback.answer("Категория не найдена.")
         return
 
-    category = categories[cat_idx]
-    user_states[uid] = {"cat": category["id"]}
+    category = visible_categories[cat_idx]
+    user_states[uid] = {"cat": category["id"]}  # сохраняем id категории
 
     titles = [q["question"] for q in category["questions"]]
     kb = paginate(titles, 0, "q")
@@ -139,18 +150,19 @@ async def pick_category(callback: CallbackQuery):
     await callback.message.edit_text(
         f"📂 *{category['name']}*\n\nВыберите вопрос:",
         parse_mode="Markdown",
-        reply_markup=kb
+        reply_markup=kb,
     )
     await callback.answer()
 
-# --- Questions ---
+# --- Show question ---
 @dp.callback_query(lambda c: c.data.startswith("q_"))
 async def show_question(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
+
     try:
-        q_idx = int(callback.data.split("_")[1])
+        q_idx = int(callback.data.split("_")[-1])
     except (IndexError, ValueError):
         await callback.answer("Ошибка.")
         return
@@ -161,39 +173,38 @@ async def show_question(callback: CallbackQuery):
         return
 
     category_id = state["cat"]
-    category = next((c for c in data["categories"] if c["id"] == category_id), None)
+    category = next((c for c in DATA["categories"] if c["id"] == category_id), None)
     if not category:
         await callback.answer("Категория не найдена.")
         return
 
     questions = category["questions"]
     if q_idx >= len(questions):
-        await callback.answer("Ошибка вопроса.")
+        await callback.answer("Вопрос не найден.")
         return
 
     question = questions[q_idx]
     stats_key = f"{category_id}_{q_idx}"
 
-kb = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
-        [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"category_{category_id}")],
-    ]
-)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👍 Полезно", callback_data=f"rate_1_{stats_key}")],
+            [InlineKeyboardButton(text="👎 Не помогло", callback_data=f"rate_0_{stats_key}")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data=f"category_{category_id}")],
+        ]
+    )
     await callback.message.edit_text(
         f"❓ *{question['question']}*\n\n{question['answer']}",
         parse_mode="Markdown",
         reply_markup=kb,
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
     await callback.answer()
 
-# --- Rate & Stats ---
+# --- Rate answer ---
 @dp.callback_query(lambda c: c.data.startswith("rate_"))
 async def rate_answer(callback: CallbackQuery):
     _, flag, key = callback.data.split("_", 2)
-    cat_id, q_id = key.split("_")
     if flag == "1":
         stats["helpful"][key] += 1
     else:
@@ -201,6 +212,7 @@ async def rate_answer(callback: CallbackQuery):
     save_stats(stats)
     await callback.answer("Спасибо за обратную связь!")
 
+# --- Admin stats ---
 @dp.callback_query(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -214,7 +226,7 @@ async def admin_stats(callback: CallbackQuery):
         lines = ["📊 Статистика по ответам:"]
         for key in set(stats["helpful"]) | set(stats["not_helpful"]):
             cat_id, q_id = key.split("_")
-            category = next(c for c in data["categories"] if str(c["id"]) == cat_id)
+            category = next(c for c in DATA["categories"] if str(c["id"]) == cat_id)
             question = category["questions"][int(q_id)]
             useful = stats["helpful"][key]
             useless = stats["not_helpful"][key]
@@ -248,7 +260,7 @@ async def show_hr_contacts(callback: CallbackQuery):
 # ---------- HTTP health check ----------
 routes = web.RouteTableDef()
 
-@routes.get('/')
+@routes.get("/")
 async def health(request):
     return web.Response(text="OK")
 
@@ -258,7 +270,7 @@ async def run_http():
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 10000))
-    await web.TCPSite(runner, '0.0.0.0', port).start()
+    await web.TCPSite(runner, "0.0.0.0", port).start()
     logging.info("HTTP server started on 0.0.0.0:%s", port)
 
 # ---------- Entry point ----------
