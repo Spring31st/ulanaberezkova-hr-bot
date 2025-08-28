@@ -268,12 +268,8 @@ async def show_hr_contacts(callback: CallbackQuery):
 @dp.message(FeedbackStates.typing)
 async def receive_feedback(msg: Message, state: FSMContext):
     text = msg.text
-    hr_target = HR_CONTACTS["telegram"][0]   # первый контакт HR
-
-    # Пытаемся отправить отзыв
-    try:
-        await bot.send_message(
-            hr_target,
+hr_target = next(iter(ADMIN_IDS))  # берём первый ID из admin_ids
+await bot.send_message(hr_target, ...)
             f"🆕 **Анонимный отзыв**\n\n{text}",
             parse_mode="Markdown"
         )
