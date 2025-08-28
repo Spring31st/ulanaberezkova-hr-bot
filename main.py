@@ -4,10 +4,13 @@ import json
 import logging
 import asyncio
 from datetime import datetime
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 from collections import Counter
 
@@ -29,7 +32,7 @@ ADMIN_IDS   = set(DATA["admin_ids"])
 HR_CONTACTS = DATA["hr_contacts"]
 
 bot = Bot(token=TOKEN)
-dp  = Dispatcher()
+dp  = Dispatcher(storage=MemoryStorage())
 
 PAGE_SIZE  = 7
 STATS_FILE = "stats.json"
@@ -79,10 +82,14 @@ def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     kb.extend([
         [InlineKeyboardButton(text="📚 Категории вопросов", callback_data="categories_0")],
         [InlineKeyboardButton(text="📞 Контакты HR", callback_data="hr_contacts")],
+        [InlineKeyboardButton(text="💬 Оставить анонимный отзыв", callback_data="leave_feedback")],
     ])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 # ---------- States ----------
+class FeedbackStates(StatesGroup):
+    typing = State()
+
 user_states: dict[int, dict] = {}
 
 # ---------- Handlers ----------
@@ -142,7 +149,7 @@ async def pick_category(callback: CallbackQuery):
         return
 
     category = visible_categories[cat_idx]
-    user_states[uid] = {"cat": category["id"]}  # сохраняем id категории
+    user_states[uid] = {"cat": category["id"]}
 
     titles = [q["question"] for q in category["questions"]]
     kb = paginate(titles, 0, "q")
@@ -256,6 +263,28 @@ async def show_hr_contacts(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+# ---------- Анонимные отзывы ----------
+@dp.callback_query(lambda c: c.data == "leave_feedback")
+async def cb_leave_feedback(callback: CallbackQuery, state: FSMContext):
+    if not allowed(callback.from_user.id):
+        return
+    await callback.message.edit_text(
+        "✏️ Напишите ваш анонимный отзыв:\nчто нравится, что можно улучшить и т.д."
+    )
+    await state.set_state(FeedbackStates.typing)
+    await callback.answer()
+
+@dp.message(FeedbackStates.typing)
+async def receive_feedback(msg: Message, state: FSMContext):
+    text = msg.text
+    await bot.send_message(
+        HR_CONTACTS["telegram"][0],  # первый Telegram-ID или @username HR
+        f"🆕 **Анонимный отзыв**\n\n{text}",
+        parse_mode="Markdown"
+    )
+    await msg.answer("✅ Спасибо! Ваш отзыв анонимно отправлен HR.")
+    await state.clear()
 
 # ---------- HTTP health check ----------
 routes = web.RouteTableDef()
