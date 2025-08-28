@@ -31,6 +31,9 @@ ALLOWED_IDS = set(DATA["allowed_user_ids"])
 ADMIN_IDS   = set(DATA["admin_ids"])
 HR_CONTACTS = DATA["hr_contacts"]
 
+# админ, которому будут приходить анонимные отзывы
+HR_ADMIN_ID = DATA["admin_ids"][0]
+
 bot = Bot(token=TOKEN)
 dp  = Dispatcher(storage=MemoryStorage())
 
@@ -62,7 +65,7 @@ stats = load_stats()
 def paginate(items: list[str], page: int, prefix: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     start = page * PAGE_SIZE
-    for idx, text in enumerate(items[start : start + PAGE_SIZE], start):
+    for idx, text in enumerate(items[start: start + PAGE_SIZE], start):
         kb.button(text=text, callback_data=f"{prefix}_{idx}")
     kb.adjust(1)
 
@@ -113,18 +116,13 @@ async def show_categories(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     parts = callback.data.split("_")
     page = int(parts[-1]) if parts[-2] in {"prev", "next"} else int(parts[-1])
-
     cat_names = [
         c["name"] for c in DATA["categories"]
         if not c.get("admin_only", False) or is_admin(uid)
     ]
-    await callback.message.edit_text(
-        "📂 Выберите категорию:",
-        reply_markup=paginate(cat_names, page, "category")
-    )
+    await callback.message.edit_text("📂 Выберите категорию:", reply_markup=paginate(cat_names, page, "category"))
     await callback.answer()
 
 # --- Pick category ---
@@ -133,7 +131,6 @@ async def pick_category(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     try:
         cat_idx = int(callback.data.split("_")[-1])
     except (IndexError, ValueError):
@@ -157,7 +154,7 @@ async def pick_category(callback: CallbackQuery):
     await callback.message.edit_text(
         f"📂 *{category['name']}*\n\nВыберите вопрос:",
         parse_mode="Markdown",
-        reply_markup=kb,
+        reply_markup=kb
     )
     await callback.answer()
 
@@ -167,7 +164,6 @@ async def show_question(callback: CallbackQuery):
     uid = callback.from_user.id
     if not allowed(uid):
         return
-
     try:
         q_idx = int(callback.data.split("_")[-1])
     except (IndexError, ValueError):
@@ -264,12 +260,23 @@ async def show_hr_contacts(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
-# ---------- Анонимные отзывы ----------
+# ---------- Anonymous feedback ----------
+@dp.callback_query(lambda c: c.data == "leave_feedback")
+async def cb_leave_feedback(callback: CallbackQuery, state: FSMContext):
+    if not allowed(callback.from_user.id):
+        return
+    await callback.message.edit_text(
+        "✏️ Напишите ваш анонимный отзыв:\nчто нравится, что можно улучшить и т.д."
+    )
+    await state.set_state(FeedbackStates.typing)
+    await callback.answer()
+
 @dp.message(FeedbackStates.typing)
 async def receive_feedback(msg: Message, state: FSMContext):
     text = msg.text
-hr_target = next(iter(ADMIN_IDS))  # берём первый ID из admin_ids
-await bot.send_message(hr_target, ...)
+    try:
+        await bot.send_message(
+            HR_ADMIN_ID,
             f"🆕 **Анонимный отзыв**\n\n{text}",
             parse_mode="Markdown"
         )
@@ -300,9 +307,6 @@ async def run_http():
     await web.TCPSite(runner, "0.0.0.0", port).start()
     logging.info("HTTP server started on 0.0.0.0:%s", port)
 
-# ---------- подключение модуля анонимных отзывов ----------
-from feedback import register_feedback
-register_feedback(dp)
 # ---------- Entry point ----------
 async def main():
     await run_http()
