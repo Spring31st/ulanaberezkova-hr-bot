@@ -300,6 +300,9 @@ async def run_http():
     await web.TCPSite(runner, "0.0.0.0", port).start()
     logging.info("HTTP server started on 0.0.0.0:%s", port)
 
+# ---------- подключение модуля анонимных отзывов ----------
+from feedback import register_feedback
+register_feedback(dp)
 # ---------- Entry point ----------
 async def main():
     await run_http()
