@@ -265,25 +265,27 @@ async def show_hr_contacts(callback: CallbackQuery):
     await callback.answer()
 
 # ---------- Анонимные отзывы ----------
-@dp.callback_query(lambda c: c.data == "leave_feedback")
-async def cb_leave_feedback(callback: CallbackQuery, state: FSMContext):
-    if not allowed(callback.from_user.id):
-        return
-    await callback.message.edit_text(
-        "✏️ Напишите ваш анонимный отзыв:\nчто нравится, что можно улучшить и т.д."
-    )
-    await state.set_state(FeedbackStates.typing)
-    await callback.answer()
-
 @dp.message(FeedbackStates.typing)
 async def receive_feedback(msg: Message, state: FSMContext):
     text = msg.text
-    await bot.send_message(
-        HR_CONTACTS["telegram"][0],  # первый Telegram-ID или @username HR
-        f"🆕 **Анонимный отзыв**\n\n{text}",
-        parse_mode="Markdown"
+    hr_target = HR_CONTACTS["telegram"][0]   # первый контакт HR
+
+    # Пытаемся отправить отзыв
+    try:
+        await bot.send_message(
+            hr_target,
+            f"🆕 **Анонимный отзыв**\n\n{text}",
+            parse_mode="Markdown"
+        )
+        answer_text = "✅ Спасибо! Ваш отзыв анонимно отправлен HR."
+    except Exception as e:
+        logging.warning("Не удалось отправить отзыв HR: %s", e)
+        answer_text = "😔 К сожалению, сейчас не удалось отправить отзыв HR. Попробуйте позже."
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]]
     )
-    await msg.answer("✅ Спасибо! Ваш отзыв анонимно отправлен HR.")
+    await msg.answer(answer_text, reply_markup=kb)
     await state.clear()
 
 # ---------- HTTP health check ----------
